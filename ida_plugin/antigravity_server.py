@@ -251,6 +251,7 @@ def get_strings(filter_regex=None):
         sl = ida_strlist.string_info_t()
         result = []
         count = 0
+        pattern = re.compile(filter_regex, re.IGNORECASE) if filter_regex else None
         for i in range(ida_strlist.get_strlist_qty()):
             if count >= MAX_STRINGS:
                 break
@@ -261,7 +262,7 @@ def get_strings(filter_regex=None):
                         text = s.decode("utf-8", errors="replace")
                     except:
                         text = str(s)
-                    if filter_regex and not re.search(filter_regex, text, re.IGNORECASE):
+                    if pattern and not pattern.search(text):
                         continue
                     result.append({"ea": hex(sl.ea), "value": text, "length": sl.length})
                     count += 1
