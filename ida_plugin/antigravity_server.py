@@ -1692,7 +1692,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             elif path == "/api/gaps":
                 self.send_json(get_function_gaps())
             elif path == "/api/ping":
-                self.send_json({"status": "ok", "server": "antigravity-ida-bridge", "version": "4.0"})
+                self.send_json({"status": "ok", "server": "antigravity-ida-bridge", "version": "5.1"})
             elif path.startswith("/api/struct/"):
                 parts = path.split("/")
                 if len(parts) >= 4:
@@ -1759,6 +1759,19 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     self.send_json(get_switch_info(ea))
                 elif action == "comment":
                     self.send_json(get_comment_at(ea))
+                elif action == "ctree":
+                    self.send_json(get_ctree_json(ea))
+                elif action == "lvar-map":
+                    self.send_json(get_lvar_map(ea))
+                elif action == "microcode":
+                    mat = int(params.get("maturity", [7])[0])
+                    self.send_json(get_microcode(ea, mat))
+                elif action == "callers":
+                    self.send_json(get_callers(ea))
+                elif action == "callees":
+                    self.send_json(get_callees(ea))
+                elif action == "strings-used":
+                    self.send_json(get_strings_used(ea))
                 else:
                     self.send_error_json(f"Unknown action: {action}")
             elif path.startswith("/api/search-text/"):
@@ -1824,23 +1837,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     self.send_json(get_code_xrefs(parse_ea(parts[3])))
                 else:
                     self.send_error_json("Use /api/code-xrefs/<ea>")
-            elif path.startswith("/api/function/"):
-                # Extended function routes (v4.0)
-                parts = path.split("/")
-                if len(parts) >= 5:
-                    ea = parse_ea(parts[3])
-                    act = parts[4]
-                    if act == "ctree": self.send_json(get_ctree_json(ea))
-                    elif act == "lvar-map": self.send_json(get_lvar_map(ea))
-                    elif act == "microcode":
-                        mat = int(params.get("maturity", [7])[0])
-                        self.send_json(get_microcode(ea, mat))
-                    elif act == "callers": self.send_json(get_callers(ea))
-                    elif act == "callees": self.send_json(get_callees(ea))
-                    elif act == "strings-used": self.send_json(get_strings_used(ea))
-                    else: self.send_error_json(f"Unknown action: {act}")
-                else:
-                    self.send_error_json("Use /api/function/<ea>/<action>")
+
             elif path == "/api/schema":
                 try:
                     import os
@@ -1908,6 +1905,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         self.send_error_json("Missing 'type' field")
                         return
                     self.send_json(set_func_type(ea, type_str))
+                elif action == "lvar-set-type":
+                    self.send_json(set_lvar_type_api(ea, data.get("var", ""), data.get("type", "")))
+                elif action == "lvar-comment":
+                    self.send_json(set_lvar_comment_api(ea, data.get("var", ""), data.get("comment", "")))
                 else:
                     self.send_error_json(f"Unknown POST action: {action}")
             elif path == "/api/struct/create":
@@ -2036,19 +2037,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 self.send_json(dbg_pause_api())
             elif path == "/api/dbg/write-memory":
                 self.send_json(dbg_write_mem(parse_ea(data.get("ea","0")),data.get("bytes","")))
-            elif path.startswith("/api/function/"):
-                parts = path.split("/")
-                if len(parts) >= 5:
-                    ea = parse_ea(parts[3])
-                    act = parts[4]
-                    if act == "lvar-set-type":
-                        self.send_json(set_lvar_type_api(ea,data.get("var",""),data.get("type","")))
-                    elif act == "lvar-comment":
-                        self.send_json(set_lvar_comment_api(ea,data.get("var",""),data.get("comment","")))
-                    else:
-                        self.send_error_json(f"Unknown POST action: {act}")
-                else:
-                    self.send_error_json("Invalid path")
+
             else:
                 self.send_error_json(f"Unknown endpoint: {path}", 404)
         except Exception as e:

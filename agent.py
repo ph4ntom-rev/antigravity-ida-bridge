@@ -1,5 +1,5 @@
 """
-Antigravity IDA Bridge v5.0 — Unified AI Agent
+Antigravity IDA Bridge v5.1 — Unified AI Agent
 ================================================
 Single entry point for all AI backends.
 
@@ -31,7 +31,7 @@ import backends.deepseek_backend    # noqa: F401
 
 def print_banner():
     print("=" * 58)
-    print("  Antigravity IDA Bridge v5.0 — Multi-Backend AI Agent")
+    print("  Antigravity IDA Bridge v5.1 — Multi-Backend AI Agent")
     print("=" * 58)
 
 
@@ -42,7 +42,7 @@ def list_backends():
     backends = AgentBackend.list_backends()
     
     for key, info in backends.items():
-        status = "✅ READY" if info.get("available") else "❌ NOT CONFIGURED"
+        status = "[OK] READY" if info.get("available") else "[--] NOT CONFIGURED"
         model = info.get("model", "?")
         name = info.get("name", key)
         print(f"  {key:12s}  {name:20s}  model: {model:30s}  {status}")

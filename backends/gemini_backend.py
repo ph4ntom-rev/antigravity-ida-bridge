@@ -5,9 +5,16 @@ Google Gemini with native function calling.
 """
 
 import os
-from google import genai
-from google.genai import types
 from .base import AgentBackend
+
+try:
+    from google import genai
+    from google.genai import types
+    HAS_GENAI = True
+except ImportError:
+    genai = None
+    types = None
+    HAS_GENAI = False
 
 
 @AgentBackend.register("gemini")
@@ -22,7 +29,7 @@ class GeminiBackend(AgentBackend):
         return os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview")
 
     def is_available(self) -> bool:
-        return bool(os.environ.get("GEMINI_API_KEY"))
+        return HAS_GENAI and bool(os.environ.get("GEMINI_API_KEY"))
 
     def chat(self, message: str) -> str:
         if not hasattr(self, "_chat"):

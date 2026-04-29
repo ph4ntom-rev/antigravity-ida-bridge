@@ -6,8 +6,14 @@ Claude Sonnet/Opus with native tool use.
 
 import os
 import json
-import anthropic
 from .base import AgentBackend
+
+try:
+    import anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    anthropic = None
+    HAS_ANTHROPIC = False
 
 
 @AgentBackend.register("anthropic")
@@ -22,7 +28,7 @@ class AnthropicBackend(AgentBackend):
         return os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
     def is_available(self) -> bool:
-        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+        return HAS_ANTHROPIC and bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     def _get_tools_schema(self) -> list:
         """Anthropic tool definitions format."""

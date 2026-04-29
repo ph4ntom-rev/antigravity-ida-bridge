@@ -7,8 +7,14 @@ Supports: llama3.1, qwen2.5, mistral, deepseek-r1, codestral, etc.
 
 import os
 import json
-import ollama as ollama_sdk
 from .base import AgentBackend
+
+try:
+    import ollama as ollama_sdk
+    HAS_OLLAMA = True
+except ImportError:
+    ollama_sdk = None
+    HAS_OLLAMA = False
 
 
 @AgentBackend.register("ollama")
@@ -24,6 +30,8 @@ class OllamaBackend(AgentBackend):
 
     def is_available(self) -> bool:
         """Check if Ollama is running locally."""
+        if not HAS_OLLAMA:
+            return False
         try:
             ollama_sdk.list()
             return True

@@ -7,8 +7,14 @@ Also used as base for DeepSeek (compatible API).
 
 import os
 import json
-from openai import OpenAI
 from .base import AgentBackend
+
+try:
+    from openai import OpenAI
+    HAS_OPENAI = True
+except ImportError:
+    OpenAI = None
+    HAS_OPENAI = False
 
 
 @AgentBackend.register("openai")
@@ -31,7 +37,7 @@ class OpenAIBackend(AgentBackend):
         return None  # Uses default OpenAI URL
 
     def is_available(self) -> bool:
-        return bool(os.environ.get(self.api_key_env))
+        return HAS_OPENAI and bool(os.environ.get(self.api_key_env))
 
     def _get_client(self) -> OpenAI:
         return OpenAI(
