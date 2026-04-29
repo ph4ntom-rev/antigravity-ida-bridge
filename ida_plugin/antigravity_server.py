@@ -1115,6 +1115,9 @@ def execute_dynamic_python(script_code):
         success = True
         error_msg = ""
         try:
+            if hasattr(ida_auto, "auto_mark_range"):
+                try: ida_auto.auto_mark_range(0, ida_idaapi.BADADDR, ida_auto.AU_USED)
+                except Exception: pass
             exec(script_code, globals(), local_vars)
         except Exception as e:
             success = False
@@ -1622,6 +1625,631 @@ def parse_ea(ea_str):
     except ValueError:
         return int(ea_str)
 
+
+def get_analyze_context(ea):
+    def _inner():
+        ctx = {}
+        try: ctx["pseudocode"] = get_pseudocode(ea)().get("pseudocode")
+        except Exception: ctx["pseudocode"] = None
+        try: ctx["lvars"] = get_lvar_map(ea)().get("lvars", {})
+        except Exception: ctx["lvars"] = {}
+        try: ctx["callers"] = get_callers(ea)().get("callers", [])
+        except Exception: ctx["callers"] = []
+        try: ctx["callees"] = get_callees(ea)().get("callees", [])
+        except Exception: ctx["callees"] = []
+        try: ctx["strings_used"] = get_strings_used(ea)().get("strings", [])
+        except Exception: ctx["strings_used"] = []
+        try: ctx["xrefs_to"] = get_xrefs_to(ea)().get("xrefs", [])
+        except Exception: ctx["xrefs_to"] = []
+        try: ctx["basic_blocks"] = get_basic_blocks(ea)().get("blocks", [])
+        except Exception: ctx["basic_blocks"] = []
+        return ctx
+    return safe_read(_inner)
+
+@get_route(r'/api/macro/analyze_context')
+def route_macro_analyze_context(self, match, params):
+    ea = parse_ea(params.get("ea", ["0"])[0])
+    self.send_json(get_analyze_context(ea)())
+
+
+# --- Micro Router ---
+import queue
+sse_queue = queue.Queue()
+
+GET_ROUTES = []
+POST_ROUTES = []
+
+def get_route(pattern):
+    def decorator(func):
+        GET_ROUTES.append((re.compile('^' + pattern + '$'), func))
+        return func
+    return decorator
+
+def post_route(pattern):
+    def decorator(func):
+        POST_ROUTES.append((re.compile('^' + pattern + '$'), func))
+        return func
+    return decorator
+
+class AntigravityUIHooks(ida_kernwin.UI_Hooks):
+    def screen_ea_changed(self, ea, prev_ea):
+        sse_queue.put({"event": "cursor_changed", "ea": hex(ea), "prev_ea": hex(prev_ea)})
+        return 0
+
+try:
+    import ida_dbg
+    class AntigravityDbgHooks(ida_dbg.DbgHooks):
+        def dbg_bpt(self, tid, ea):
+            sse_queue.put({"event": "breakpoint_hit", "tid": tid, "ea": hex(ea)})
+            return 0
+    dbg_hooks = AntigravityDbgHooks()
+except Exception:
+    dbg_hooks = None
+
+ui_hooks = AntigravityUIHooks()
+
+@get_route(r'/api/info')
+def route_do_get_0(self, match, params):
+    self.send_json(get_info())
+
+@get_route(r'/api/functions')
+def route_do_get_1(self, match, params):
+    self.send_json(get_functions())
+
+@get_route(r'/api/strings')
+def route_do_get_2(self, match, params):
+    filt = params.get('filter', [None])[0]
+    self.send_json(get_strings(filt))
+
+@get_route(r'/api/imports')
+def route_do_get_3(self, match, params):
+    self.send_json(get_imports())
+
+@get_route(r'/api/exports')
+def route_do_get_4(self, match, params):
+    self.send_json(get_exports())
+
+@get_route(r'/api/segments')
+def route_do_get_5(self, match, params):
+    self.send_json(get_segments())
+
+@get_route(r'/api/structs')
+def route_do_get_6(self, match, params):
+    self.send_json(get_structs())
+
+@get_route(r'/api/enums')
+def route_do_get_7(self, match, params):
+    self.send_json(get_enums())
+
+@get_route(r'/api/names')
+def route_do_get_8(self, match, params):
+    filt = params.get('filter', [None])[0]
+    self.send_json(get_names(filt))
+
+@get_route(r'/api/wait-analysis')
+def route_do_get_9(self, match, params):
+    self.send_json(wait_for_analysis())
+
+@get_route(r'/api/global-vars')
+def route_do_get_10(self, match, params):
+    self.send_json(get_global_vars())
+
+@get_route(r'/api/bookmarks')
+def route_do_get_11(self, match, params):
+    self.send_json(get_bookmarks())
+
+@get_route(r'/api/patches')
+def route_do_get_12(self, match, params):
+    self.send_json(get_patches())
+
+@get_route(r'/api/gaps')
+def route_do_get_13(self, match, params):
+    self.send_json(get_function_gaps())
+
+@get_route(r'/api/ping')
+def route_do_get_14(self, match, params):
+    self.send_json({'status': 'ok', 'server': 'antigravity-ida-bridge', 'version': '4.0'})
+
+@get_route(r'/api/struct/.*')
+def route_do_get_15(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 4:
+        self.send_json(get_struct_details(parts[3]))
+    else:
+        self.send_error_json('Use /api/struct/<name>')
+
+@get_route(r'/api/enum/.*')
+def route_do_get_16(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 4:
+        self.send_json(get_enum_details(parts[3]))
+    else:
+        self.send_error_json('Use /api/enum/<name>')
+
+@get_route(r'/api/vtable/.*')
+def route_do_get_17(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 4:
+        self.send_json(get_vtable(parse_ea(parts[3])))
+    else:
+        self.send_error_json('Use /api/vtable/<ea>')
+
+@get_route(r'/api/bytes/.*')
+def route_do_get_18(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 5:
+        self.send_json(read_bytes(parse_ea(parts[3]), int(parts[4])))
+    else:
+        self.send_error_json('Use /api/bytes/<ea>/<size>')
+
+@get_route(r'/api/search-func/.*')
+def route_do_get_19(self, match, params):
+    parts = match.string.split('/', 4)
+    if len(parts) >= 4:
+        self.send_json(find_func_by_name(parts[3]))
+    else:
+        self.send_error_json('Use /api/search-func/<name>')
+
+@get_route(r'/api/search-bytes/.*')
+def route_do_get_20(self, match, params):
+    parts = match.string.split('/', 4)
+    if len(parts) >= 4:
+        self.send_json(search_bytes(parts[3]))
+    else:
+        self.send_error_json('Use /api/search-bytes/<pattern>')
+
+@get_route(r'/api/function/.*')
+def route_do_get_21(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) < 5:
+        self.send_error_json('Invalid path. Use /api/function/<ea>/<action>')
+        return
+    ea = parse_ea(parts[3])
+    action = parts[4]
+    if action == 'pseudocode':
+        self.send_json(get_pseudocode(ea))
+    elif action == 'disasm':
+        self.send_json(get_disasm(ea))
+    elif action == 'xrefs-to':
+        self.send_json(get_xrefs_to(ea))
+    elif action == 'xrefs-from':
+        self.send_json(get_xrefs_from(ea))
+    elif action == 'details':
+        self.send_json(get_func_details(ea))
+    elif action == 'call-graph':
+        depth = int(params.get('depth', [3])[0])
+        self.send_json(get_call_graph(ea, depth))
+    elif action == 'basic-blocks':
+        self.send_json(get_basic_blocks(ea))
+    elif action == 'stack-vars':
+        self.send_json(get_stack_vars(ea))
+    elif action == 'args':
+        self.send_json(get_func_args(ea))
+    elif action == 'switch':
+        self.send_json(get_switch_info(ea))
+    elif action == 'comment':
+        self.send_json(get_comment_at(ea))
+    else:
+        self.send_error_json(f'Unknown action: {action}')
+
+@get_route(r'/api/search-text/.*')
+def route_do_get_22(self, match, params):
+    parts = match.string.split('/', 4)
+    if len(parts) >= 4:
+        self.send_json(search_text_in_disasm(parts[3]))
+    else:
+        self.send_error_json('Use /api/search-text/<text>')
+
+@get_route(r'/api/types')
+def route_do_get_23(self, match, params):
+    self.send_json(get_local_types())
+
+@get_route(r'/api/type-libraries')
+def route_do_get_24(self, match, params):
+    self.send_json(get_type_libraries())
+
+@get_route(r'/api/cursor')
+def route_do_get_25(self, match, params):
+    self.send_json(get_cursor_pos())
+
+@get_route(r'/api/selection')
+def route_do_get_26(self, match, params):
+    self.send_json(get_selection_range())
+
+@get_route(r'/api/functions-page')
+def route_do_get_27(self, match, params):
+    off = int(params.get('offset', [0])[0])
+    lim = int(params.get('limit', [500])[0])
+    self.send_json(get_functions_paginated(off, lim))
+
+@get_route(r'/api/dbg/breakpoints')
+def route_do_get_28(self, match, params):
+    self.send_json(dbg_list_bps())
+
+@get_route(r'/api/dbg/regs')
+def route_do_get_29(self, match, params):
+    self.send_json(dbg_get_regs())
+
+@get_route(r'/api/dbg/threads')
+def route_do_get_30(self, match, params):
+    self.send_json(dbg_get_threads())
+
+@get_route(r'/api/dbg/stack')
+def route_do_get_31(self, match, params):
+    self.send_json(dbg_get_stack())
+
+@get_route(r'/api/dbg/memory/.*')
+def route_do_get_32(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 6:
+        self.send_json(dbg_read_mem(parse_ea(parts[4]), int(parts[5])))
+    else:
+        self.send_error_json('Use /api/dbg/memory/<ea>/<size>')
+
+@get_route(r'/api/type/.*')
+def route_do_get_33(self, match, params):
+    parts = match.string.split('/', 4)
+    if len(parts) >= 4:
+        self.send_json(get_type_by_name(parts[3]))
+    else:
+        self.send_error_json('Use /api/type/<name>')
+
+@get_route(r'/api/insn/.*')
+def route_do_get_34(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 4:
+        self.send_json(get_instruction(parse_ea(parts[3])))
+    else:
+        self.send_error_json('Use /api/insn/<ea>')
+
+@get_route(r'/api/operands/.*')
+def route_do_get_35(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 4:
+        self.send_json(get_operands(parse_ea(parts[3])))
+    else:
+        self.send_error_json('Use /api/operands/<ea>')
+
+@get_route(r'/api/data-xrefs/.*')
+def route_do_get_36(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 4:
+        self.send_json(get_data_xrefs(parse_ea(parts[3])))
+    else:
+        self.send_error_json('Use /api/data-xrefs/<ea>')
+
+@get_route(r'/api/code-xrefs/.*')
+def route_do_get_37(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 4:
+        self.send_json(get_code_xrefs(parse_ea(parts[3])))
+    else:
+        self.send_error_json('Use /api/code-xrefs/<ea>')
+
+@get_route(r'/api/function/.*')
+def route_do_get_38(self, match, params):
+    parts = match.string.split('/')
+    if len(parts) >= 5:
+        ea = parse_ea(parts[3])
+        act = parts[4]
+        if act == 'ctree':
+            self.send_json(get_ctree_json(ea))
+        elif act == 'lvar-map':
+            self.send_json(get_lvar_map(ea))
+        elif act == 'microcode':
+            mat = int(params.get('maturity', [7])[0])
+            self.send_json(get_microcode(ea, mat))
+        elif act == 'callers':
+            self.send_json(get_callers(ea))
+        elif act == 'callees':
+            self.send_json(get_callees(ea))
+        elif act == 'strings-used':
+            self.send_json(get_strings_used(ea))
+        else:
+            self.send_error_json(f'Unknown action: {act}')
+    else:
+        self.send_error_json('Use /api/function/<ea>/<action>')
+
+@get_route(r'/api/schema')
+def route_do_get_39(self, match, params):
+    try:
+        import os
+        schema_path = os.path.join(os.path.dirname(__file__), '..', 'api_schema.json')
+        if os.path.exists(schema_path):
+            with open(schema_path, 'r', encoding='utf-8') as f:
+                self.send_json(json.load(f))
+        else:
+            self.send_error_json('api_schema.json not found', 404)
+    except Exception as e:
+        self.send_error_json(str(e), 500)
+
+@post_route(r'/api/batch')
+def route_do_post_0(self, match, data):
+    mutations = data.get('mutations', [])
+    if not mutations:
+        self.send_error_json('No mutations provided')
+        return
+    self.send_json(execute_batch(mutations))
+
+@post_route(r'/api/function/.*')
+def route_do_post_1(self, match, data):
+    parts = match.string.split('/')
+    if len(parts) < 5:
+        self.send_error_json('Invalid path')
+        return
+    ea = parse_ea(parts[3])
+    action = parts[4]
+    if action == 'rename':
+        name = data.get('name')
+        if not name:
+            self.send_error_json("Missing 'name' field")
+            return
+        self.send_json(rename_function(ea, name))
+    elif action == 'comment':
+        comment = data.get('comment', '')
+        self.send_json(set_function_comment(ea, comment))
+    elif action == 'lvar-rename':
+        old = data.get('old')
+        new = data.get('new')
+        if not old or not new:
+            self.send_error_json("Missing 'old' and/or 'new' fields")
+            return
+        self.send_json(rename_local_var(ea, old, new))
+    elif action == 'set-type':
+        type_str = data.get('type')
+        if not type_str:
+            self.send_error_json("Missing 'type' field")
+            return
+        self.send_json(set_func_type(ea, type_str))
+    else:
+        self.send_error_json(f'Unknown POST action: {action}')
+
+@post_route(r'/api/struct/create')
+def route_do_post_2(self, match, data):
+    definition = data.get('definition')
+    if not definition:
+        self.send_error_json("Missing 'definition' field")
+        return
+    self.send_json(create_struct(definition))
+
+@post_route(r'/api/struct/add-member')
+def route_do_post_3(self, match, data):
+    sn = data.get('struct')
+    mn = data.get('member')
+    off = data.get('offset', -1)
+    sz = data.get('size', 4)
+    tp = data.get('type')
+    self.send_json(add_struct_member_api(sn, mn, off, sz, tp))
+
+@post_route(r'/api/enum/create')
+def route_do_post_4(self, match, data):
+    name = data.get('name')
+    if not name:
+        self.send_error_json("Missing 'name' field")
+        return
+    self.send_json(create_enum_api(name, data.get('width', 4)))
+
+@post_route(r'/api/enum/add-member')
+def route_do_post_5(self, match, data):
+    en = data.get('enum')
+    mn = data.get('member')
+    val = data.get('value', 0)
+    self.send_json(add_enum_member_api(en, mn, val))
+
+@post_route(r'/api/save')
+def route_do_post_6(self, match, data):
+    self.send_json(save_database())
+
+@post_route(r'/api/make-func')
+def route_do_post_7(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(make_function(ea))
+
+@post_route(r'/api/delete-func')
+def route_do_post_8(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(delete_function(ea))
+
+@post_route(r'/api/set-color')
+def route_do_post_9(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    color = int(data.get('color', '0'), 16) if isinstance(data.get('color'), str) else data.get('color', 0)
+    self.send_json(set_color(ea, color))
+
+@post_route(r'/api/decompile-batch')
+def route_do_post_10(self, match, data):
+    ea_list = [parse_ea(e) for e in data.get('addresses', [])]
+    self.send_json(decompile_batch(ea_list))
+
+@post_route(r'/api/patch-bytes')
+def route_do_post_11(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(patch_bytes_at(ea, data.get('bytes', '')))
+
+@post_route(r'/api/make-code')
+def route_do_post_12(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(make_code_at(ea, data.get('size', 0)))
+
+@post_route(r'/api/make-data')
+def route_do_post_13(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(make_data_at(ea, data.get('size', 4)))
+
+@post_route(r'/api/undefine')
+def route_do_post_14(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(undefine_range(ea, data.get('size', 1)))
+
+@post_route(r'/api/set-name')
+def route_do_post_15(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(set_name_at(ea, data.get('name', '')))
+
+@post_route(r'/api/apply-struct')
+def route_do_post_16(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(apply_struct_at(ea, data.get('struct', '')))
+
+@post_route(r'/api/delete-struct')
+def route_do_post_17(self, match, data):
+    self.send_json(delete_struct_api(data.get('name', '')))
+
+@post_route(r'/api/delete-enum')
+def route_do_post_18(self, match, data):
+    self.send_json(delete_enum_api(data.get('name', '')))
+
+@post_route(r'/api/add-bookmark')
+def route_do_post_19(self, match, data):
+    ea = parse_ea(data.get('ea', '0'))
+    self.send_json(add_bookmark_api(ea, data.get('description', ''), data.get('slot', -1)))
+
+@post_route(r'/api/delete-bookmark')
+def route_do_post_20(self, match, data):
+    self.send_json(delete_bookmark_api(data.get('slot', 0)))
+
+@post_route(r'/api/import-header')
+def route_do_post_21(self, match, data):
+    self.send_json(import_c_header(data.get('path', '')))
+
+@post_route(r'/api/reanalyze')
+def route_do_post_22(self, match, data):
+    s = parse_ea(data.get('start', '0'))
+    e = parse_ea(data.get('end', '0'))
+    self.send_json(reanalyze_range(s, e))
+
+@post_route(r'/api/exec')
+def route_do_post_23(self, match, data):
+    script = data.get('script', '')
+    self.send_json(execute_dynamic_python(script))
+
+@post_route(r'/api/address/.*')
+def route_do_post_24(self, match, data):
+    parts = match.string.split('/')
+    if len(parts) < 5:
+        self.send_error_json('Invalid path')
+        return
+    ea = parse_ea(parts[3])
+    action = parts[4]
+    if action == 'comment':
+        comment = data.get('comment', '')
+        self.send_json(set_address_comment(ea, comment))
+    else:
+        self.send_error_json(f'Unknown action: {action}')
+
+@post_route(r'/api/type/create')
+def route_do_post_25(self, match, data):
+    self.send_json(create_type_from_c(data.get('definition', '')))
+
+@post_route(r'/api/type/delete')
+def route_do_post_26(self, match, data):
+    self.send_json(delete_local_type(data.get('name', '')))
+
+@post_route(r'/api/type-library/load')
+def route_do_post_27(self, match, data):
+    self.send_json(load_til_api(data.get('name', '')))
+
+@post_route(r'/api/segment/create')
+def route_do_post_28(self, match, data):
+    self.send_json(create_segment_api(parse_ea(data.get('start', '0')), parse_ea(data.get('end', '0')), data.get('name', 'seg'), data.get('class', 'DATA'), data.get('bitness', 2)))
+
+@post_route(r'/api/segment/delete')
+def route_do_post_29(self, match, data):
+    self.send_json(delete_segment_api(parse_ea(data.get('ea', '0'))))
+
+@post_route(r'/api/segment/set-attrs')
+def route_do_post_30(self, match, data):
+    self.send_json(set_segment_attrs_api(parse_ea(data.get('ea', '0')), data))
+
+@post_route(r'/api/undo')
+def route_do_post_31(self, match, data):
+    self.send_json(undo_action())
+
+@post_route(r'/api/redo')
+def route_do_post_32(self, match, data):
+    self.send_json(redo_action())
+
+@post_route(r'/api/navigate')
+def route_do_post_33(self, match, data):
+    self.send_json(navigate_to(parse_ea(data.get('ea', '0'))))
+
+@post_route(r'/api/dbg/start')
+def route_do_post_34(self, match, data):
+    self.send_json(dbg_start_process(data.get('path'), data.get('args', ''), data.get('sdir')))
+
+@post_route(r'/api/dbg/attach')
+def route_do_post_35(self, match, data):
+    self.send_json(dbg_attach_process(data.get('pid', 0)))
+
+@post_route(r'/api/dbg/detach')
+def route_do_post_36(self, match, data):
+    self.send_json(dbg_detach())
+
+@post_route(r'/api/dbg/breakpoint')
+def route_do_post_37(self, match, data):
+    self.send_json(dbg_set_bp(parse_ea(data.get('ea', '0')), data.get('hardware', False)))
+
+@post_route(r'/api/dbg/del-breakpoint')
+def route_do_post_38(self, match, data):
+    self.send_json(dbg_del_bp(parse_ea(data.get('ea', '0'))))
+
+@post_route(r'/api/dbg/step-into')
+def route_do_post_39(self, match, data):
+    self.send_json(dbg_step_into_api())
+
+@post_route(r'/api/dbg/step-over')
+def route_do_post_40(self, match, data):
+    self.send_json(dbg_step_over_api())
+
+@post_route(r'/api/dbg/continue')
+def route_do_post_41(self, match, data):
+    self.send_json(dbg_continue_api())
+
+@post_route(r'/api/dbg/pause')
+def route_do_post_42(self, match, data):
+    self.send_json(dbg_pause_api())
+
+@post_route(r'/api/dbg/write-memory')
+def route_do_post_43(self, match, data):
+    self.send_json(dbg_write_mem(parse_ea(data.get('ea', '0')), data.get('bytes', '')))
+
+@post_route(r'/api/function/.*')
+def route_do_post_44(self, match, data):
+    parts = match.string.split('/')
+    if len(parts) >= 5:
+        ea = parse_ea(parts[3])
+        act = parts[4]
+        if act == 'lvar-set-type':
+            self.send_json(set_lvar_type_api(ea, data.get('var', ''), data.get('type', '')))
+        elif act == 'lvar-comment':
+            self.send_json(set_lvar_comment_api(ea, data.get('var', ''), data.get('comment', '')))
+        else:
+            self.send_error_json(f'Unknown POST action: {act}')
+    else:
+        self.send_error_json('Invalid path')
+
+
+@get_route(r'/api/events')
+def route_events(self, match, params):
+    self.send_response(200)
+    self.send_header('Content-Type', 'text/event-stream')
+    self.send_header('Cache-Control', 'no-cache')
+    self.send_header('Connection', 'keep-alive')
+    self.send_header('Access-Control-Allow-Origin', '*')
+    self.end_headers()
+
+    while True:
+        try:
+            event = sse_queue.get(timeout=1.0)
+            self.wfile.write(f"data: {json.dumps(event)}\n\n".encode('utf-8'))
+            self.wfile.flush()
+        except queue.Empty:
+            self.wfile.write(b": ping\n\n")
+            self.wfile.flush()
+        except Exception:
+            break
+
+
 class BridgeHandler(BaseHTTPRequestHandler):
     """HTTP handler for the Antigravity-IDA Bridge."""
 
@@ -1654,405 +2282,33 @@ class BridgeHandler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
-        if not self._check_auth():
-            return
+        if not self._check_auth(): return
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         params = parse_qs(parsed.query)
-
-        try:
-            if path == "/api/info":
-                self.send_json(get_info())
-            elif path == "/api/functions":
-                self.send_json(get_functions())
-            elif path == "/api/strings":
-                filt = params.get("filter", [None])[0]
-                self.send_json(get_strings(filt))
-            elif path == "/api/imports":
-                self.send_json(get_imports())
-            elif path == "/api/exports":
-                self.send_json(get_exports())
-            elif path == "/api/segments":
-                self.send_json(get_segments())
-            elif path == "/api/structs":
-                self.send_json(get_structs())
-            elif path == "/api/enums":
-                self.send_json(get_enums())
-            elif path == "/api/names":
-                filt = params.get("filter", [None])[0]
-                self.send_json(get_names(filt))
-            elif path == "/api/wait-analysis":
-                self.send_json(wait_for_analysis())
-            elif path == "/api/global-vars":
-                self.send_json(get_global_vars())
-            elif path == "/api/bookmarks":
-                self.send_json(get_bookmarks())
-            elif path == "/api/patches":
-                self.send_json(get_patches())
-            elif path == "/api/gaps":
-                self.send_json(get_function_gaps())
-            elif path == "/api/ping":
-                self.send_json({"status": "ok", "server": "antigravity-ida-bridge", "version": "4.0"})
-            elif path.startswith("/api/struct/"):
-                parts = path.split("/")
-                if len(parts) >= 4:
-                    self.send_json(get_struct_details(parts[3]))
-                else:
-                    self.send_error_json("Use /api/struct/<name>")
-            elif path.startswith("/api/enum/"):
-                parts = path.split("/")
-                if len(parts) >= 4:
-                    self.send_json(get_enum_details(parts[3]))
-                else:
-                    self.send_error_json("Use /api/enum/<name>")
-            elif path.startswith("/api/vtable/"):
-                parts = path.split("/")
-                if len(parts) >= 4:
-                    self.send_json(get_vtable(parse_ea(parts[3])))
-                else:
-                    self.send_error_json("Use /api/vtable/<ea>")
-            elif path.startswith("/api/bytes/"):
-                parts = path.split("/")
-                if len(parts) >= 5:
-                    self.send_json(read_bytes(parse_ea(parts[3]), int(parts[4])))
-                else:
-                    self.send_error_json("Use /api/bytes/<ea>/<size>")
-            elif path.startswith("/api/search-func/"):
-                parts = path.split("/", 4)
-                if len(parts) >= 4:
-                    self.send_json(find_func_by_name(parts[3]))
-                else:
-                    self.send_error_json("Use /api/search-func/<name>")
-            elif path.startswith("/api/search-bytes/"):
-                parts = path.split("/", 4)
-                if len(parts) >= 4:
-                    self.send_json(search_bytes(parts[3]))
-                else:
-                    self.send_error_json("Use /api/search-bytes/<pattern>")
-            elif path.startswith("/api/function/"):
-                parts = path.split("/")
-                if len(parts) < 5:
-                    self.send_error_json("Invalid path. Use /api/function/<ea>/<action>")
-                    return
-                ea = parse_ea(parts[3])
-                action = parts[4]
-                if action == "pseudocode":
-                    self.send_json(get_pseudocode(ea))
-                elif action == "disasm":
-                    self.send_json(get_disasm(ea))
-                elif action == "xrefs-to":
-                    self.send_json(get_xrefs_to(ea))
-                elif action == "xrefs-from":
-                    self.send_json(get_xrefs_from(ea))
-                elif action == "details":
-                    self.send_json(get_func_details(ea))
-                elif action == "call-graph":
-                    depth = int(params.get("depth", [3])[0])
-                    self.send_json(get_call_graph(ea, depth))
-                elif action == "basic-blocks":
-                    self.send_json(get_basic_blocks(ea))
-                elif action == "stack-vars":
-                    self.send_json(get_stack_vars(ea))
-                elif action == "args":
-                    self.send_json(get_func_args(ea))
-                elif action == "switch":
-                    self.send_json(get_switch_info(ea))
-                elif action == "comment":
-                    self.send_json(get_comment_at(ea))
-                else:
-                    self.send_error_json(f"Unknown action: {action}")
-            elif path.startswith("/api/search-text/"):
-                parts = path.split("/", 4)
-                if len(parts) >= 4:
-                    self.send_json(search_text_in_disasm(parts[3]))
-                else:
-                    self.send_error_json("Use /api/search-text/<text>")
-            # ── New v4.0 GET routes ──
-            elif path == "/api/types":
-                self.send_json(get_local_types())
-            elif path == "/api/type-libraries":
-                self.send_json(get_type_libraries())
-            elif path == "/api/cursor":
-                self.send_json(get_cursor_pos())
-            elif path == "/api/selection":
-                self.send_json(get_selection_range())
-            elif path == "/api/functions-page":
-                off = int(params.get("offset", [0])[0])
-                lim = int(params.get("limit", [500])[0])
-                self.send_json(get_functions_paginated(off, lim))
-            elif path == "/api/dbg/breakpoints":
-                self.send_json(dbg_list_bps())
-            elif path == "/api/dbg/regs":
-                self.send_json(dbg_get_regs())
-            elif path == "/api/dbg/threads":
-                self.send_json(dbg_get_threads())
-            elif path == "/api/dbg/stack":
-                self.send_json(dbg_get_stack())
-            elif path.startswith("/api/dbg/memory/"):
-                parts = path.split("/")
-                if len(parts) >= 6:
-                    self.send_json(dbg_read_mem(parse_ea(parts[4]), int(parts[5])))
-                else:
-                    self.send_error_json("Use /api/dbg/memory/<ea>/<size>")
-            elif path.startswith("/api/type/"):
-                parts = path.split("/", 4)
-                if len(parts) >= 4:
-                    self.send_json(get_type_by_name(parts[3]))
-                else:
-                    self.send_error_json("Use /api/type/<name>")
-            elif path.startswith("/api/insn/"):
-                parts = path.split("/")
-                if len(parts) >= 4:
-                    self.send_json(get_instruction(parse_ea(parts[3])))
-                else:
-                    self.send_error_json("Use /api/insn/<ea>")
-            elif path.startswith("/api/operands/"):
-                parts = path.split("/")
-                if len(parts) >= 4:
-                    self.send_json(get_operands(parse_ea(parts[3])))
-                else:
-                    self.send_error_json("Use /api/operands/<ea>")
-            elif path.startswith("/api/data-xrefs/"):
-                parts = path.split("/")
-                if len(parts) >= 4:
-                    self.send_json(get_data_xrefs(parse_ea(parts[3])))
-                else:
-                    self.send_error_json("Use /api/data-xrefs/<ea>")
-            elif path.startswith("/api/code-xrefs/"):
-                parts = path.split("/")
-                if len(parts) >= 4:
-                    self.send_json(get_code_xrefs(parse_ea(parts[3])))
-                else:
-                    self.send_error_json("Use /api/code-xrefs/<ea>")
-            elif path.startswith("/api/function/"):
-                # Extended function routes (v4.0)
-                parts = path.split("/")
-                if len(parts) >= 5:
-                    ea = parse_ea(parts[3])
-                    act = parts[4]
-                    if act == "ctree": self.send_json(get_ctree_json(ea))
-                    elif act == "lvar-map": self.send_json(get_lvar_map(ea))
-                    elif act == "microcode":
-                        mat = int(params.get("maturity", [7])[0])
-                        self.send_json(get_microcode(ea, mat))
-                    elif act == "callers": self.send_json(get_callers(ea))
-                    elif act == "callees": self.send_json(get_callees(ea))
-                    elif act == "strings-used": self.send_json(get_strings_used(ea))
-                    else: self.send_error_json(f"Unknown action: {act}")
-                else:
-                    self.send_error_json("Use /api/function/<ea>/<action>")
-            elif path == "/api/schema":
-                try:
-                    import os
-                    schema_path = os.path.join(os.path.dirname(__file__), "..", "api_schema.json")
-                    if os.path.exists(schema_path):
-                        with open(schema_path, "r", encoding="utf-8") as f:
-                            self.send_json(json.load(f))
-                    else:
-                        self.send_error_json("api_schema.json not found", 404)
-                except Exception as e:
-                    self.send_error_json(str(e), 500)
-            else:
-                self.send_error_json(f"Unknown endpoint: {path}", 404)
-        except Exception as e:
-            self.send_json({"error": str(e), "traceback": traceback.format_exc()}, 500)
+        for pattern, handler in GET_ROUTES:
+            m = pattern.match(path)
+            if m:
+                try: handler(self, m, params)
+                except Exception as e: self.send_error_json(str(e))
+                return
+        self.send_error_json("Unknown GET endpoint: " + path, 404)
 
     def do_POST(self):
-        if not self._check_auth():
-            return
+        if not self._check_auth(): return
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
-
-        # Read body
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
-        try:
-            data = json.loads(body) if body else {}
-        except json.JSONDecodeError:
-            self.send_error_json("Invalid JSON body")
-            return
-
-        try:
-            if path == "/api/batch":
-                mutations = data.get("mutations", [])
-                if not mutations:
-                    self.send_error_json("No mutations provided")
-                    return
-                self.send_json(execute_batch(mutations))
-            elif path.startswith("/api/function/"):
-                parts = path.split("/")
-                if len(parts) < 5:
-                    self.send_error_json("Invalid path")
-                    return
-                ea = parse_ea(parts[3])
-                action = parts[4]
-                if action == "rename":
-                    name = data.get("name")
-                    if not name:
-                        self.send_error_json("Missing 'name' field")
-                        return
-                    self.send_json(rename_function(ea, name))
-                elif action == "comment":
-                    comment = data.get("comment", "")
-                    self.send_json(set_function_comment(ea, comment))
-                elif action == "lvar-rename":
-                    old = data.get("old")
-                    new = data.get("new")
-                    if not old or not new:
-                        self.send_error_json("Missing 'old' and/or 'new' fields")
-                        return
-                    self.send_json(rename_local_var(ea, old, new))
-                elif action == "set-type":
-                    type_str = data.get("type")
-                    if not type_str:
-                        self.send_error_json("Missing 'type' field")
-                        return
-                    self.send_json(set_func_type(ea, type_str))
-                else:
-                    self.send_error_json(f"Unknown POST action: {action}")
-            elif path == "/api/struct/create":
-                definition = data.get("definition")
-                if not definition:
-                    self.send_error_json("Missing 'definition' field")
-                    return
-                self.send_json(create_struct(definition))
-            elif path == "/api/struct/add-member":
-                sn = data.get("struct")
-                mn = data.get("member")
-                off = data.get("offset", -1)
-                sz = data.get("size", 4)
-                tp = data.get("type")
-                self.send_json(add_struct_member_api(sn, mn, off, sz, tp))
-            elif path == "/api/enum/create":
-                name = data.get("name")
-                if not name:
-                    self.send_error_json("Missing 'name' field")
-                    return
-                self.send_json(create_enum_api(name, data.get("width", 4)))
-            elif path == "/api/enum/add-member":
-                en = data.get("enum")
-                mn = data.get("member")
-                val = data.get("value", 0)
-                self.send_json(add_enum_member_api(en, mn, val))
-            elif path == "/api/save":
-                self.send_json(save_database())
-            elif path == "/api/make-func":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(make_function(ea))
-            elif path == "/api/delete-func":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(delete_function(ea))
-            elif path == "/api/set-color":
-                ea = parse_ea(data.get("ea", "0"))
-                color = int(data.get("color", "0"), 16) if isinstance(data.get("color"), str) else data.get("color", 0)
-                self.send_json(set_color(ea, color))
-            elif path == "/api/decompile-batch":
-                ea_list = [parse_ea(e) for e in data.get("addresses", [])]
-                self.send_json(decompile_batch(ea_list))
-            elif path == "/api/patch-bytes":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(patch_bytes_at(ea, data.get("bytes", "")))
-            elif path == "/api/make-code":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(make_code_at(ea, data.get("size", 0)))
-            elif path == "/api/make-data":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(make_data_at(ea, data.get("size", 4)))
-            elif path == "/api/undefine":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(undefine_range(ea, data.get("size", 1)))
-            elif path == "/api/set-name":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(set_name_at(ea, data.get("name", "")))
-            elif path == "/api/apply-struct":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(apply_struct_at(ea, data.get("struct", "")))
-            elif path == "/api/delete-struct":
-                self.send_json(delete_struct_api(data.get("name", "")))
-            elif path == "/api/delete-enum":
-                self.send_json(delete_enum_api(data.get("name", "")))
-            elif path == "/api/add-bookmark":
-                ea = parse_ea(data.get("ea", "0"))
-                self.send_json(add_bookmark_api(ea, data.get("description", ""), data.get("slot", -1)))
-            elif path == "/api/delete-bookmark":
-                self.send_json(delete_bookmark_api(data.get("slot", 0)))
-            elif path == "/api/import-header":
-                self.send_json(import_c_header(data.get("path", "")))
-            elif path == "/api/reanalyze":
-                s = parse_ea(data.get("start", "0"))
-                e = parse_ea(data.get("end", "0"))
-                self.send_json(reanalyze_range(s, e))
-            elif path == "/api/exec":
-                script = data.get("script", "")
-                self.send_json(execute_dynamic_python(script))
-            elif path.startswith("/api/address/"):
-                parts = path.split("/")
-                if len(parts) < 5:
-                    self.send_error_json("Invalid path")
-                    return
-                ea = parse_ea(parts[3])
-                action = parts[4]
-                if action == "comment":
-                    comment = data.get("comment", "")
-                    self.send_json(set_address_comment(ea, comment))
-                else:
-                    self.send_error_json(f"Unknown action: {action}")
-            # ── New v4.0 POST routes ──
-            elif path == "/api/type/create":
-                self.send_json(create_type_from_c(data.get("definition", "")))
-            elif path == "/api/type/delete":
-                self.send_json(delete_local_type(data.get("name", "")))
-            elif path == "/api/type-library/load":
-                self.send_json(load_til_api(data.get("name", "")))
-            elif path == "/api/segment/create":
-                self.send_json(create_segment_api(parse_ea(data.get("start","0")),parse_ea(data.get("end","0")),data.get("name","seg"),data.get("class","DATA"),data.get("bitness",2)))
-            elif path == "/api/segment/delete":
-                self.send_json(delete_segment_api(parse_ea(data.get("ea","0"))))
-            elif path == "/api/segment/set-attrs":
-                self.send_json(set_segment_attrs_api(parse_ea(data.get("ea","0")),data))
-            elif path == "/api/undo":
-                self.send_json(undo_action())
-            elif path == "/api/redo":
-                self.send_json(redo_action())
-            elif path == "/api/navigate":
-                self.send_json(navigate_to(parse_ea(data.get("ea","0"))))
-            elif path == "/api/dbg/start":
-                self.send_json(dbg_start_process(data.get("path"),data.get("args",""),data.get("sdir")))
-            elif path == "/api/dbg/attach":
-                self.send_json(dbg_attach_process(data.get("pid",0)))
-            elif path == "/api/dbg/detach":
-                self.send_json(dbg_detach())
-            elif path == "/api/dbg/breakpoint":
-                self.send_json(dbg_set_bp(parse_ea(data.get("ea","0")),data.get("hardware",False)))
-            elif path == "/api/dbg/del-breakpoint":
-                self.send_json(dbg_del_bp(parse_ea(data.get("ea","0"))))
-            elif path == "/api/dbg/step-into":
-                self.send_json(dbg_step_into_api())
-            elif path == "/api/dbg/step-over":
-                self.send_json(dbg_step_over_api())
-            elif path == "/api/dbg/continue":
-                self.send_json(dbg_continue_api())
-            elif path == "/api/dbg/pause":
-                self.send_json(dbg_pause_api())
-            elif path == "/api/dbg/write-memory":
-                self.send_json(dbg_write_mem(parse_ea(data.get("ea","0")),data.get("bytes","")))
-            elif path.startswith("/api/function/"):
-                parts = path.split("/")
-                if len(parts) >= 5:
-                    ea = parse_ea(parts[3])
-                    act = parts[4]
-                    if act == "lvar-set-type":
-                        self.send_json(set_lvar_type_api(ea,data.get("var",""),data.get("type","")))
-                    elif act == "lvar-comment":
-                        self.send_json(set_lvar_comment_api(ea,data.get("var",""),data.get("comment","")))
-                    else:
-                        self.send_error_json(f"Unknown POST action: {act}")
-                else:
-                    self.send_error_json("Invalid path")
-            else:
-                self.send_error_json(f"Unknown endpoint: {path}", 404)
-        except Exception as e:
-            self.send_json({"error": str(e), "traceback": traceback.format_exc()}, 500)
+        cl = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(cl).decode("utf-8") if cl > 0 else "{}"
+        try: data = json.loads(body) if body else {}
+        except json.JSONDecodeError: return self.send_error_json("Invalid JSON body")
+        for pattern, handler in POST_ROUTES:
+            m = pattern.match(path)
+            if m:
+                try: handler(self, m, data)
+                except Exception as e: self.send_error_json(str(e))
+                return
+        self.send_error_json("Unknown POST endpoint: " + path, 404)
 
 # ─── Server Lifecycle ────────────────────────────────────────────────────────
 
@@ -2069,6 +2325,15 @@ def start_server(host=HOST, port=PORT):
     _server = ThreadingHTTPServer((host, port), BridgeHandler)
     _thread = threading.Thread(target=_server.serve_forever, daemon=True)
     _thread.start()
+
+    ui_hooks.hook()
+    if dbg_hooks:
+        dbg_hooks.hook()
+
+    ui_hooks.hook()
+    if dbg_hooks:
+        dbg_hooks.hook()
+
     print(f"[Antigravity] ✅ Bridge server started on http://{host}:{port}")
     print(f"[Antigravity] 🔑 Auth token: {AUTH_TOKEN}")
     print(f"[Antigravity] 🔑 Token file: {_token_path}")
@@ -2080,6 +2345,11 @@ def stop_server():
     global _server, _thread
     if _server:
         _server.shutdown()
+
+    ui_hooks.unhook()
+    if dbg_hooks:
+        dbg_hooks.unhook()
+
         _server = None
         _thread = None
         print("[Antigravity] Server stopped.")

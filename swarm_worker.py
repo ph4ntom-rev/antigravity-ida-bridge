@@ -15,6 +15,20 @@ import bridge_cli
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview")
 
+
+def load_progress():
+    if os.path.exists("progress.json"):
+        with open("progress.json", "r") as f:
+            return set(json.load(f))
+    return set()
+
+def save_progress(processed_eas):
+    if not processed_eas: return
+    prog = load_progress()
+    prog.update(processed_eas)
+    with open("progress.json", "w") as f:
+        json.dump(list(prog), f)
+
 class FunctionAnalysis(BaseModel):
     suggested_name: str = Field(description="A descriptive, CamelCase or snake_case name for the function based on its logic. Prefix with class name if applicable (e.g. CEntity_GetName). Do not use 'sub_'")
     comment: str = Field(description="A concise technical explanation of what the function does and what data it manipulates.")
@@ -102,6 +116,8 @@ def process_batch(functions_to_process, max_workers=5):
         print(json.dumps(res, indent=2))
         bridge.wait_analysis()
         print("[+] Batch applied successfully.")
+        processed = [m['ea'] for m in mutations if m['op'] == 'rename-func']
+        save_progress(processed)
     else:
         print("[-] No mutations to apply.")
 
@@ -122,8 +138,14 @@ def main():
     all_funcs = res.get("functions", [])
     print(f"[*] Total functions in database: {len(all_funcs)}")
     
+
     # Filter only unnamed functions
     unnamed = [f for f in all_funcs if f["name"].startswith("sub_")]
+
+    # Check progress
+    processed = load_progress()
+    unnamed = [f for f in unnamed if f["ea"] not in processed]
+
     print(f"[*] Unnamed functions: {len(unnamed)}")
     
     if not unnamed:
