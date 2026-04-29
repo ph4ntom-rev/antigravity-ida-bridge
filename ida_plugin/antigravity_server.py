@@ -55,6 +55,7 @@ HOST = "127.0.0.1"
 PORT = 13370
 MAX_FUNCTIONS = 5000
 MAX_STRINGS = 2000
+_cached_schema = None
 
 # ─── Authentication ──────────────────────────────────────────────────────────
 
@@ -1068,8 +1069,30 @@ def delete_bookmark_api(slot):
 def import_c_header(filepath):
     """Import/parse a C header file."""
     def _inner():
-        errors = idc.parse_decls(open(filepath, 'r').read(), idc.PT_FILE | idc.PT_TYP)
-        return {"success": errors > 0, "types_parsed": errors, "file": filepath}
+        # Ensure the path is resolved and normalized to prevent traversal
+        try:
+            abs_path = os.path.realpath(filepath)
+        except Exception:
+            abs_path = os.path.abspath(filepath)
+
+        # Security: Prevent reading sensitive system files.
+        # While IDA can be used to analyze any file, this API shouldn't be an easy way to read sensitive system files.
+        # We block common sensitive paths and UNC bypasses.
+        blocked_prefixes = (
+            '/etc/', '/proc/', '/sys/', '/var/log/',  # Unix
+            'C:\\Windows\\', 'C:\\Users\\All Users\\', # Windows
+            '\\\\', # UNC path bypass
+        )
+        if any(abs_path.lower().startswith(prefix.lower()) for prefix in blocked_prefixes):
+            return {"success": False, "error": "Access to this path is restricted for security reasons."}
+
+        if not os.path.exists(abs_path) or not os.path.isfile(abs_path):
+            return {"success": False, "error": f"File not found: {filepath}"}
+
+        with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        errors = idc.parse_decls(content, idc.PT_FILE | idc.PT_TYP)
+        return {"success": errors > 0, "types_parsed": errors, "file": abs_path}
     return safe_write(_inner)
 
 def reanalyze_range(start_ea, end_ea):
@@ -1843,13 +1866,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     self.send_error_json("Use /api/function/<ea>/<action>")
             elif path == "/api/schema":
                 try:
-                    import os
-                    schema_path = os.path.join(os.path.dirname(__file__), "..", "api_schema.json")
-                    if os.path.exists(schema_path):
-                        with open(schema_path, "r", encoding="utf-8") as f:
-                            self.send_json(json.load(f))
-                    else:
-                        self.send_error_json("api_schema.json not found", 404)
+                    global _cached_schema
+                    if _cached_schema is None:
+                        # Resolve path safely and validate it
+                        schema_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "api_schema.json"))
+                        if os.path.basename(schema_path) != "api_schema.json":
+                            raise ValueError("Invalid schema path")
+
+                        if os.path.exists(schema_path) and os.path.isfile(schema_path):
+                            with open(schema_path, "r", encoding="utf-8") as f:
+                                _cached_schema = json.load(f)
+                        else:
+                            self.send_error_json("api_schema.json not found", 404)
+                            return
+                    self.send_json(_cached_schema)
                 except Exception as e:
                     self.send_error_json(str(e), 500)
             else:
