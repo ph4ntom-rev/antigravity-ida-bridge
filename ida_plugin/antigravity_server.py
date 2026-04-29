@@ -313,7 +313,7 @@ def get_segments():
                 "end_ea": hex(s.end_ea),
                 "name": ida_segment.get_segm_name(s),
                 "size": s.size(),
-                "perm": f"{'r' if s.perm & ida_segment.SFL_READ else '-'}{'w' if s.perm & ida_segment.SFL_WRITE else '-'}{'x' if s.perm & ida_segment.SFL_EXEC else '-'}",
+                "perm": f"{'r' if s.perm & ida_segment.SEGPERM_READ else '-'}{'w' if s.perm & ida_segment.SEGPERM_WRITE else '-'}{'x' if s.perm & ida_segment.SEGPERM_EXEC else '-'}",
             })
         return {"segments": segs, "count": len(segs)}
     return safe_read(_inner)
