@@ -6,6 +6,7 @@
 [![IDA Pro 9.x](https://img.shields.io/badge/IDA_Pro-9.x-blueviolet?style=flat-square)](https://hex-rays.com)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Endpoints](https://img.shields.io/badge/endpoints-90+-orange?style=flat-square)](#api-coverage)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-00ff41?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJ3aGl0ZSI+PHBhdGggZD0iTTEyIDJMMyA3djEwbDkgNSA5LTVWN3oiLz48L3N2Zz4=)](#mcp-server)
 
 ---
 
@@ -24,13 +25,15 @@ A lightweight HTTP server plugin for **IDA Pro 9.x** that exposes **90+ REST end
 │  └──────────────────┬────────────────────────┘  │
 └─────────────────────┼───────────────────────────┘
                       │ JSON/HTTP
-        ┌─────────────┼──────────────┐
-        ▼             ▼              ▼
-   bridge_cli    orchestrator    swarm_worker
-   (Terminal)    (AI Agent)      (Bulk AI)
-                      │              │
-                      ▼              ▼
-                 Gemini 3.1 Pro API
+    ┌─────────┬───────┼───────┬──────────────┐
+    ▼         ▼       ▼       ▼              ▼
+bridge_cli  MCP     agent    swarm     Any HTTP
+(Terminal) Server  (Gemini)  (Bulk)     client
+             │
+   ┌─────────┼─────────┐
+   ▼         ▼         ▼
+ Claude   Cursor     Cline
+Desktop  /Windsurf   /etc
 ```
 
 ## Features
@@ -97,6 +100,52 @@ set GEMINI_API_KEY=your_key_here
 python swarm_worker.py --limit 200 --workers 5
 ```
 
+## MCP Server
+
+The bridge includes a **Model Context Protocol (MCP)** server, making IDA Pro accessible to **any MCP-compatible AI client** — Claude Desktop, Cursor, Cline, Windsurf, and more.
+
+### Setup for Claude Desktop
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ida-bridge": {
+      "command": "python",
+      "args": ["C:/path/to/mcp_server.py"]
+    }
+  }
+}
+```
+
+### Setup for Cursor
+
+Add to `.cursor/mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "ida-bridge": {
+      "command": "python",
+      "args": ["C:/path/to/mcp_server.py"]
+    }
+  }
+}
+```
+
+### Available MCP Tools (45)
+
+| Category | Tools |
+|:---------|:------|
+| **Analysis** | `decompile`, `get_ctree`, `get_microcode`, `get_disassembly`, `get_function_details`, `get_local_variables` |
+| **Navigation** | `get_callers`, `get_callees`, `get_call_graph`, `get_xrefs_to`, `get_xrefs_from`, `get_strings_used`, `get_basic_blocks` |
+| **Search** | `search_function`, `search_bytes`, `search_text`, `list_strings`, `list_names` |
+| **Types** | `list_structs`, `get_struct`, `list_types`, `get_type`, `create_type`, `create_struct` |
+| **Mutations** | `rename_function`, `comment_function`, `rename_variable`, `set_variable_type`, `set_function_type`, `patch_bytes`, `batch_mutations` |
+| **Debugger** | `dbg_start`, `dbg_set_breakpoint`, `dbg_continue`, `dbg_step_into`, `dbg_step_over`, `dbg_get_registers`, `dbg_read_memory`, `dbg_get_stack` |
+| **Utility** | `execute_idapython`, `undo`, `redo`, `navigate_to`, `save_database` |
+
 ## API Coverage
 
 <details>
@@ -140,6 +189,7 @@ python swarm_worker.py --limit 200 --workers 5
 | File | Purpose |
 |:-----|:--------|
 | `ida_plugin/antigravity_server.py` | IDA Pro HTTP plugin (2000+ lines, all-in-one) |
+| `mcp_server.py` | **MCP server — universal AI client interface** |
 | `bridge_cli.py` | Python client library + CLI |
 | `agent_orchestrator.py` | Autonomous AI agent with Gemini function calling |
 | `swarm_worker.py` | Multi-threaded bulk AI analyzer |
@@ -156,8 +206,9 @@ python swarm_worker.py --limit 200 --workers 5
 
 - IDA Pro 9.x with Hex-Rays Decompiler
 - Python 3.10+
-- `requests` (for CLI/agent)
-- `google-genai` (for AI features)
+- `requests` (for CLI/agent/MCP)
+- `fastmcp>=3.0` (for MCP server)
+- `google-genai` (for Gemini AI agent)
 
 ## License
 
