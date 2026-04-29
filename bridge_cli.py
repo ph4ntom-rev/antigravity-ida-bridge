@@ -189,14 +189,8 @@ class BridgeCLI:
 
 
 def format_output(data):
-    """Pretty-print JSON result."""
-    if isinstance(data, dict) and "error" in data and data["error"]:
-        print(f"ERROR: {data['error']}", file=sys.stderr)
-        if "traceback" in data:
-            print(data["traceback"], file=sys.stderr)
-        return 1
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-    return 0
+    """Format the response data for CLI output."""
+    return json.dumps(data, indent=2, ensure_ascii=False)
 
 
 def main():
@@ -367,7 +361,15 @@ def main():
     else:
         parser.print_help()
         return 1
-    return format_output(r)
+
+    if isinstance(r, dict) and "error" in r and r["error"]:
+        print(f"ERROR: {r['error']}", file=sys.stderr)
+        if "traceback" in r:
+            print(r["traceback"], file=sys.stderr)
+        return 1
+
+    print(format_output(r))
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
