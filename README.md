@@ -1,203 +1,162 @@
 # Antigravity IDA Bridge 🌉
 
-> **AI-native reverse engineering platform** — Your IDE agent controls IDA Pro.
+> **AI-native reverse engineering platform** — Any AI agent controls IDA Pro.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg?style=flat-square)](https://python.org)
 [![IDA Pro 9.x](https://img.shields.io/badge/IDA_Pro-9.x-blueviolet?style=flat-square)](https://hex-rays.com)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Endpoints](https://img.shields.io/badge/endpoints-90+-orange?style=flat-square)](#api-coverage)
-[![MCP](https://img.shields.io/badge/MCP-Compatible-00ff41?style=flat-square)](#mcp-server)
-[![Backends](https://img.shields.io/badge/AI_backends-5-ff6b6b?style=flat-square)](#standalone-ai-agent)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-00ff41?style=flat-square)](#2-mcp-server)
+[![Backends](https://img.shields.io/badge/AI_backends-5-ff6b6b?style=flat-square)](#3-standalone-agent)
 
 ---
 
-## How It Works
+## What Is This?
 
-You talk to your AI agent. The agent controls IDA Pro through the bridge. That's it.
+A plugin for **IDA Pro** that turns it into an API server with **90+ REST endpoints**. Any AI agent — IDE-based, cloud, local, or MCP — can control IDA Pro, decompile code, trace cross-references, rename functions, and even **generate and execute IDAPython scripts on the fly**.
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  You (in Antigravity IDE / Cursor / Claude Desktop)          │
-│                                                              │
-│  "open malware.exe and find all C2 communication logic"      │
-│                          │                                   │
-│                          ▼                                   │
-│                   ┌──────────────┐                           │
-│                   │   AI Agent   │  ← The IDE agent IS the   │
-│                   │  (built-in)  │    brain. No separate app. │
-│                   └──────┬───────┘                           │
-│                          │ calls bridge.py                   │
-│                          ▼                                   │
-│                   ┌──────────────┐                           │
-│                   │  bridge.py   │  ← Single-file CLI tool.  │
-│                   │  (JSON I/O)  │    All commands, one file. │
-│                   └──────┬───────┘                           │
-└──────────────────────────┼───────────────────────────────────┘
-                           │ HTTP / REST
-                           ▼
-                   ┌──────────────────┐
-                   │    IDA Pro 9.x   │
-                   │  + plugin (90+   │
-                   │    endpoints)    │
-                   └──────────────────┘
+              ┌─────────────────────────────────────────┐
+              │             IDA Pro 9.x                  │
+              │  antigravity_server.py (90+ endpoints)   │
+              │  http://127.0.0.1:13370                  │
+              └──────────────────┬──────────────────────┘
+                                 │ REST / JSON
+         ┌───────────┬───────────┼───────────┬───────────┐
+         ▼           ▼           ▼           ▼           ▼
+   ┌──────────┐ ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+   │Antigravity│ │   MCP    │ │Standalone│ │ Direct │ │ Swarm  │
+   │   IDE    │ │ Server   │ │ Agent  │ │  API   │ │ Worker │
+   │          │ │          │ │        │ │        │ │        │
+   │ bridge.py│ │ 45 tools │ │ 5 LLMs │ │ curl / │ │ Bulk   │
+   │ + skill  │ │ Claude   │ │ Ollama │ │ Python │ │ scan   │
+   │          │ │ Cursor   │ │ Gemini │ │        │ │        │
+   └──────────┘ └──────────┘ └────────┘ └────────┘ └────────┘
 ```
 
-### The Key Idea
+## 4 Ways to Connect
 
-Your IDE already has an AI agent built in. **You don't need another AI** — you just need to give your agent **hands inside IDA Pro**. That's what `bridge.py` does.
+### 1. AI IDE Agent (Antigravity IDE / Cursor / Windsurf)
 
-| File | Role |
-|:-----|:-----|
-| `AGENT_SKILL.md` | Instructions for the AI agent — what commands exist, how to analyze |
-| `bridge.py` | The tool — one file, all commands, clean JSON output |
-| `ida_plugin/antigravity_server.py` | The server — runs inside IDA, exposes 90+ REST endpoints |
+Your IDE already has an AI agent. Give it **hands inside IDA** — it reads `agent_config.json`, calls `bridge.py`, gets JSON back.
+
+```
+You: "find all network functions in this binary"
+IDE Agent reads: agent_config.json (knows all commands + script execution)
+IDE Agent runs:  python bridge.py strings --filter socket    → JSON
+IDE Agent runs:  python bridge.py decompile 0x140005A00      → JSON
+IDE Agent runs:  python bridge.py exec "print(idautils...)"  → JSON
+IDE Agent:       "Found 3 network functions, here's what they do..."
+```
+
+**Setup:** Place `AGENT_SKILL.md` and `agent_config.json` in your workspace. The agent reads them automatically.
+
+### 2. MCP Server (Claude Desktop / Cursor / Cline)
+
+45 native MCP tools. Zero configuration beyond pointing to the server.
+
+```json
+{
+  "mcpServers": {
+    "ida-bridge": {
+      "command": "python",
+      "args": ["path/to/integrations/mcp_server.py"]
+    }
+  }
+}
+```
+
+### 3. Standalone Agent (no IDE needed)
+
+Built-in AI agent with 5 interchangeable backends:
+
+```bash
+python agent.py                          # Auto-detect best backend
+python agent.py --backend ollama         # 🏠 Local (free, private)
+python agent.py --backend gemini         # ☁️ Google Gemini
+python agent.py --backend openai         # ☁️ OpenAI GPT-4o
+python agent.py --backend anthropic      # ☁️ Anthropic Claude
+python agent.py --backend deepseek       # ☁️ DeepSeek
+```
+
+### 4. Direct REST API (any HTTP client)
+
+```bash
+curl http://127.0.0.1:13370/api/info
+curl http://127.0.0.1:13370/api/function/0x140001000/pseudocode
+curl -X POST http://127.0.0.1:13370/api/exec -d '{"script":"print(here())"}'
+```
+
+## Dynamic Script Execution
+
+The most powerful feature: **the AI agent can generate Python scripts and execute them inside IDA Pro in real-time**.
+
+This isn't limited to the 90 pre-built endpoints. The agent can write *any* IDAPython code:
+
+```python
+# Agent generates this script on the fly and sends it to /api/exec:
+import idautils, idc
+
+result['suspicious'] = []
+for ea in idautils.Functions():
+    name = idc.get_func_name(ea)
+    for ref in idautils.CodeRefsFrom(ea, 0):
+        api = idc.get_func_name(ref)
+        if api in ['CreateRemoteThread', 'VirtualAllocEx', 'WriteProcessMemory']:
+            result['suspicious'].append({
+                'function': name,
+                'address': hex(ea),
+                'calls': api
+            })
+```
+
+Available IDA SDK modules: `idc`, `idaapi`, `idautils`, `ida_hexrays`, `ida_funcs`, `ida_bytes`, `ida_struct`, `ida_dbg`, `ida_typeinf`, `ida_segment`, `ida_xref`, `ida_auto`, and 10+ more.
+
+The agent sees the full list in `agent_config.json` with examples.
 
 ## Quick Start
 
-### 1. Install the IDA Plugin
+### 1. Install Plugin
 
-Copy `ida_plugin/antigravity_server.py` → your IDA `plugins/` folder.
-
-Or load manually: **File → Script File → antigravity_server.py**
-
-```
-[Antigravity] ✅ Bridge server started on http://127.0.0.1:13370
-[Antigravity] 🔑 Auth token: a1b2c3d4e5f6...
-```
+Copy `ida_plugin/antigravity_server.py` → IDA `plugins/` folder.
 
 ### 2. Install Dependencies
 
 ```bash
-pip install requests
+pip install requests                    # Core (required)
+pip install ollama                      # Local LLM backend
+pip install google-genai                # Gemini backend
+pip install openai                      # OpenAI / DeepSeek backend
+pip install anthropic                   # Claude backend
+pip install fastmcp                     # MCP Server
 ```
 
-### 3. Use from Your IDE
-
-Open `AGENT_SKILL.md` in your workspace. Your IDE agent will read it and learn how to use the bridge.
-
-Then just talk to your agent:
-> "Launch IDA with `C:\samples\malware.exe` and find all encryption routines"
-
-The agent will call `bridge.py` commands automatically:
+### 3. Use
 
 ```bash
-python bridge.py launch C:\samples\malware.exe
-python bridge.py wait
+# Terminal CLI
+python bridge.py ping
 python bridge.py info
-python bridge.py strings --filter crypt
-python bridge.py decompile 0x140005A00
-python bridge.py rename 0x140005A00 aes_encrypt
+python bridge.py decompile 0x140001000
+python bridge.py strings --filter password
+python bridge.py launch binary.exe
+python bridge.py exec "print(idc.get_func_name(here()))"
+
+# Interactive agent
+python agent.py --backend ollama
 ```
 
-### 4. Or Use from Terminal
+## Key Files
 
-```bash
-python bridge.py ping                          # Check connection
-python bridge.py info                          # Binary metadata
-python bridge.py decompile 0x140001000         # Decompile function
-python bridge.py strings --filter password     # Search strings
-python bridge.py functions --limit 50          # List functions
-python bridge.py xrefs 0x140001000             # Cross-references
-python bridge.py callers 0x140001000           # Who calls this?
-python bridge.py rename 0x140001000 main       # Rename function
-python bridge.py comment 0x140001000 "entry"   # Add comment
-python bridge.py exec "print(here())"          # Run IDAPython
-python bridge.py launch binary.exe             # Find IDA + open binary
-python bridge.py wait                          # Wait for bridge
-```
-
-## MCP Server
-
-Universal AI client interface — works with **Claude Desktop**, **Cursor**, **Cline**, **Windsurf**.
-
-### Claude Desktop
-
-Add to `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "ida-bridge": {
-      "command": "python",
-      "args": ["C:/path/to/integrations/mcp_server.py"]
-    }
-  }
-}
-```
-
-### Cursor / Windsurf
-
-Add to `.cursor/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "ida-bridge": {
-      "command": "python",
-      "args": ["C:/path/to/integrations/mcp_server.py"]
-    }
-  }
-}
-```
-
-### 45 MCP Tools
-
-| Category | Tools |
-|:---------|:------|
-| **Analysis** | `decompile`, `get_ctree`, `get_microcode`, `get_disassembly`, `get_function_details`, `get_local_variables` |
-| **Navigation** | `get_callers`, `get_callees`, `get_call_graph`, `get_xrefs_to`, `get_xrefs_from`, `get_strings_used`, `get_basic_blocks` |
-| **Search** | `search_function`, `search_bytes`, `search_text`, `list_strings`, `list_names` |
-| **Types** | `list_structs`, `get_struct`, `list_types`, `get_type`, `create_type`, `create_struct` |
-| **Mutations** | `rename_function`, `comment_function`, `rename_variable`, `set_variable_type`, `set_function_type`, `patch_bytes`, `batch_mutations` |
-| **Debugger** | `dbg_start`, `dbg_set_breakpoint`, `dbg_continue`, `dbg_step_into`, `dbg_step_over`, `dbg_get_registers`, `dbg_read_memory`, `dbg_get_stack` |
-| **Utility** | `execute_idapython`, `undo`, `redo`, `navigate_to`, `save_database` |
-
-## Standalone AI Agent
-
-Don't use an AI IDE? Run the agent directly with any of 5 backends:
-
-```bash
-python agent.py                              # Auto-detect backend
-python agent.py --backend ollama             # Local LLM (free, private)
-python agent.py --backend gemini             # Google Gemini
-python agent.py --backend openai             # OpenAI GPT-4o
-python agent.py --backend anthropic          # Anthropic Claude
-python agent.py --backend deepseek           # DeepSeek
-python agent.py --list-backends              # Show available
-```
-
-| Backend | Type | Models | Env Variable |
-|:--------|:-----|:-------|:-------------|
-| **Ollama** | 🏠 Local | llama3.1, qwen2.5, mistral | — (auto-detect) |
-| **Gemini** | ☁️ Cloud | gemini-3.1-pro, gemini-3-flash | `GEMINI_API_KEY` |
-| **OpenAI** | ☁️ Cloud | gpt-4o, o3, o4-mini | `OPENAI_API_KEY` |
-| **Anthropic** | ☁️ Cloud | claude-sonnet-4, claude-opus | `ANTHROPIC_API_KEY` |
-| **DeepSeek** | ☁️ Cloud | deepseek-chat, deepseek-reasoner | `DEEPSEEK_API_KEY` |
-
-## Project Structure
-
-```
-antigravity-ida-bridge/
-├── ida_plugin/
-│   └── antigravity_server.py       # IDA Pro HTTP plugin (90+ endpoints)
-├── core/
-│   ├── client.py                   # Reusable HTTP client
-│   └── schema.py                   # API schema loader
-├── backends/
-│   ├── base.py                     # Abstract backend + registry
-│   ├── ollama_backend.py           # Local LLM
-│   ├── gemini_backend.py           # Google Gemini
-│   ├── openai_backend.py           # OpenAI
-│   ├── anthropic_backend.py        # Anthropic Claude
-│   └── deepseek_backend.py         # DeepSeek
-├── integrations/
-│   ├── mcp_server.py               # MCP server for AI clients
-│   └── ide_extension.py            # IDE workspace config generator
-├── bridge.py                       # ⭐ Single-file CLI for IDE agents
-├── AGENT_SKILL.md                  # ⭐ Instructions for IDE agents
-├── agent.py                        # Standalone multi-backend agent
-├── bridge_cli.py                   # Full-featured terminal CLI
-├── swarm_worker.py                 # Bulk AI analyzer
-└── api_schema.json                 # Machine-readable API spec
-```
+| File | For Whom | Purpose |
+|:-----|:---------|:--------|
+| `agent_config.json` | **Any AI agent** | Machine-readable config — all commands, all modes, script examples |
+| `AGENT_SKILL.md` | **IDE agents** | Human-readable instructions for IDE AI agents |
+| `bridge.py` | **IDE agents** | Single-file CLI — all commands, clean JSON output |
+| `ida_plugin/antigravity_server.py` | **IDA Pro** | HTTP server plugin (90+ endpoints) |
+| `integrations/mcp_server.py` | **MCP clients** | 45 MCP tools for Claude/Cursor/Cline |
+| `agent.py` | **Terminal users** | Standalone agent with 5 AI backends |
+| `api_schema.json` | **Agents** | Full API specification (system prompt) |
 
 ## API Coverage
 
@@ -233,7 +192,8 @@ antigravity-ida-bridge/
 | **Segments** | `segment/create`, `segment/delete`, `segment/set-attrs` |
 | **Binary Mod** | `patch-bytes`, `make-code`, `make-data`, `make-func`, `delete-func`, `undefine` |
 | **Debugger** | `dbg/start`, `dbg/attach`, `dbg/detach`, `dbg/breakpoint`, `dbg/step-into`, `dbg/step-over`, `dbg/continue`, `dbg/pause`, `dbg/write-memory` |
-| **Utility** | `batch`, `exec`, `save`, `undo`, `redo`, `navigate`, `reanalyze` |
+| **Script** | `exec` — **execute any IDAPython script generated by the AI** |
+| **Utility** | `batch`, `save`, `undo`, `redo`, `navigate`, `reanalyze` |
 
 </details>
 
@@ -242,14 +202,7 @@ antigravity-ida-bridge/
 - **Bearer Token Auth** — Auto-generated per session, stored in temp file
 - **Localhost Only** — Binds to `127.0.0.1`, not exposed to network
 - **Path Hardening** — Directory traversal and UNC path protection
-- **CORS Headers** — Configurable cross-origin policy
-
-## Requirements
-
-- IDA Pro 9.x with Hex-Rays Decompiler
-- Python 3.10+
-- `requests` (core — only hard dependency)
-- Backend-specific packages (see [Standalone AI Agent](#standalone-ai-agent))
+- **Atomic Rollback** — `undo` endpoint reverts AI mistakes
 
 ## License
 

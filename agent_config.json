@@ -1,0 +1,105 @@
+{
+  "name": "Antigravity IDA Bridge",
+  "version": "5.1",
+  "description": "AI agent interface to IDA Pro reverse engineering environment",
+  "bridge_url": "http://127.0.0.1:13370",
+  "auth": {
+    "type": "bearer",
+    "token_file": "${TEMP}/.antigravity_token",
+    "note": "Token is auto-generated when IDA plugin starts. Read from file and send as Authorization: Bearer <token>"
+  },
+
+  "integration_modes": {
+    "ide_agent": {
+      "description": "For AI IDE agents (Antigravity IDE, Cursor, Windsurf). The IDE agent IS the brain — it reads this config and calls bridge.py via shell commands.",
+      "tool": "bridge.py",
+      "skill_file": "AGENT_SKILL.md",
+      "usage": "python bridge.py <command> [args]"
+    },
+    "mcp_server": {
+      "description": "For MCP-compatible clients (Claude Desktop, Cursor, Cline). Exposes 45 native MCP tools.",
+      "entry": "integrations/mcp_server.py",
+      "config_claude": {"command": "python", "args": ["integrations/mcp_server.py"]},
+      "config_cursor": {"command": "python", "args": ["integrations/mcp_server.py"]}
+    },
+    "standalone_agent": {
+      "description": "Interactive agent with built-in AI. Supports 5 backends.",
+      "entry": "agent.py",
+      "backends": ["ollama", "gemini", "openai", "anthropic", "deepseek"],
+      "usage": "python agent.py --backend <name>"
+    },
+    "direct_api": {
+      "description": "Raw REST API. Any HTTP client can call endpoints directly.",
+      "base_url": "http://127.0.0.1:13370",
+      "example_get": "GET /api/function/0x140001000/pseudocode",
+      "example_post": "POST /api/exec {\"script\": \"print(idc.get_func_name(here()))\"}"
+    }
+  },
+
+  "script_execution": {
+    "endpoint": "POST /api/exec",
+    "description": "The agent can generate arbitrary Python scripts and execute them inside IDA Pro in real-time. This is the most powerful tool — it gives full access to the IDA SDK.",
+    "body": {"script": "<python code>"},
+    "available_modules": [
+      "idc", "idaapi", "idautils", "ida_funcs", "ida_bytes", "ida_name",
+      "ida_hexrays", "ida_struct", "ida_enum", "ida_typeinf", "ida_segment",
+      "ida_dbg", "ida_kernwin", "ida_nalt", "ida_ua", "ida_auto",
+      "ida_search", "ida_lines", "ida_xref", "ida_frame", "ida_ida"
+    ],
+    "return_data": "Place results in the global 'result' dict: result['key'] = value",
+    "stdout_capture": "print() output is captured and returned in response",
+    "examples": [
+      {
+        "task": "Get all function names and addresses",
+        "script": "import idautils, idc\nresult['functions'] = [{'ea': hex(ea), 'name': idc.get_func_name(ea)} for ea in idautils.Functions()]"
+      },
+      {
+        "task": "Find all calls to a specific API",
+        "script": "import idautils, idc\nfor ea in idautils.Functions():\n    for ref in idautils.CodeRefsFrom(ea, 0):\n        name = idc.get_func_name(ref)\n        if 'CreateFile' in name:\n            result.setdefault('callers', []).append({'from': hex(ea), 'to': name})"
+      },
+      {
+        "task": "Rename all sub_ functions based on string references",
+        "script": "import idautils, idc, ida_bytes\nfor ea in idautils.Functions():\n    name = idc.get_func_name(ea)\n    if name.startswith('sub_'):\n        for ref in idautils.DataRefsFrom(ea):\n            s = idc.get_strlit_contents(ref)\n            if s:\n                idc.set_name(ea, f'uses_{s[:20].decode()}')\n                break"
+      },
+      {
+        "task": "Dump decompiled pseudocode of current function",
+        "script": "import ida_hexrays\ncfunc = ida_hexrays.decompile(idc.here())\nresult['pseudocode'] = str(cfunc)"
+      },
+      {
+        "task": "Map all imported DLLs and their functions",
+        "script": "import idautils\nimports = {}\ndef cb(ea, name, ordinal):\n    imports.setdefault(current_dll, []).append(name or f'ord_{ordinal}')\n    return True\nfor i in range(idaapi.get_import_module_qty()):\n    current_dll = idaapi.get_import_module_name(i)\n    idaapi.enum_import_names(i, cb)\nresult['imports'] = imports"
+      }
+    ],
+    "tips": [
+      "You can write ANY valid Python that would work in IDA's Script Command window",
+      "Use ida_auto.auto_wait() before analysis-dependent operations",
+      "Use idc.set_name(), idc.set_cmt() to annotate the database",
+      "Long scripts are fine — there is no size limit",
+      "If an endpoint doesn't exist for what you need, generate a script instead"
+    ]
+  },
+
+  "commands": {
+    "ping":      {"method": "GET",  "path": "/api/ping",      "description": "Check if bridge is online"},
+    "info":      {"method": "GET",  "path": "/api/info",      "description": "Binary metadata (name, arch, bits, entry, func count)"},
+    "functions": {"method": "GET",  "path": "/api/functions",  "description": "List all functions"},
+    "decompile": {"method": "GET",  "path": "/api/function/{ea}/pseudocode", "description": "Decompile function to C"},
+    "ctree":     {"method": "GET",  "path": "/api/function/{ea}/ctree",      "description": "Hex-Rays ctree AST"},
+    "microcode": {"method": "GET",  "path": "/api/function/{ea}/microcode",  "description": "Hex-Rays microcode IR"},
+    "callers":   {"method": "GET",  "path": "/api/function/{ea}/callers",    "description": "Functions that call this one"},
+    "callees":   {"method": "GET",  "path": "/api/function/{ea}/callees",    "description": "Functions called by this one"},
+    "xrefs":     {"method": "GET",  "path": "/api/function/{ea}/xrefs-to",   "description": "All cross-references to address"},
+    "strings":   {"method": "GET",  "path": "/api/strings",   "description": "All strings. Use ?filter= to search"},
+    "imports":   {"method": "GET",  "path": "/api/imports",   "description": "Imported functions"},
+    "exports":   {"method": "GET",  "path": "/api/exports",   "description": "Exported functions"},
+    "bytes":     {"method": "GET",  "path": "/api/bytes/{ea}/{size}", "description": "Read raw bytes"},
+    "structs":   {"method": "GET",  "path": "/api/structs",   "description": "All structures"},
+    "enums":     {"method": "GET",  "path": "/api/enums",     "description": "All enums"},
+    "segments":  {"method": "GET",  "path": "/api/segments",  "description": "Memory segments"},
+    "rename":    {"method": "POST", "path": "/api/function/{ea}/rename",  "body": {"name": "..."}, "description": "Rename function"},
+    "comment":   {"method": "POST", "path": "/api/function/{ea}/comment", "body": {"comment": "..."}, "description": "Set comment"},
+    "exec":      {"method": "POST", "path": "/api/exec", "body": {"script": "..."}, "description": "Execute IDAPython script"},
+    "undo":      {"method": "POST", "path": "/api/undo",      "description": "Undo last change"},
+    "save":      {"method": "POST", "path": "/api/save",      "description": "Save IDA database"}
+  }
+}
