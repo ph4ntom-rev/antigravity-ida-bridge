@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+*.idb
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+.antigravity_token
