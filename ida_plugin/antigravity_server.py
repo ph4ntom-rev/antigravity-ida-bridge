@@ -1318,9 +1318,9 @@ def set_segment_attrs_api(ea, attrs):
         if "class" in attrs: ida_segment.set_segm_class(seg, attrs["class"])
         if "perm" in attrs:
             p = attrs["perm"]; seg.perm = 0
-            if 'r' in p: seg.perm |= ida_segment.SFL_READ
-            if 'w' in p: seg.perm |= ida_segment.SFL_WRITE
-            if 'x' in p: seg.perm |= ida_segment.SFL_EXEC
+            if 'r' in p: seg.perm |= ida_segment.SEGPERM_READ
+            if 'w' in p: seg.perm |= ida_segment.SEGPERM_WRITE
+            if 'x' in p: seg.perm |= ida_segment.SEGPERM_EXEC
             seg.update()
         return {"success":True,"ea":hex(ea)}
     return safe_write(_inner)
