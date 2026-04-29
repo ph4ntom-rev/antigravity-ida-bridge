@@ -1,140 +1,209 @@
 # Antigravity IDA Bridge 🌉
 
-> **AI-powered IDA Pro REST API** — Turn IDA Pro into a programmable, AI-driven reverse engineering engine.
+> **The autonomous reverse engineering platform** — Give it a binary, get back the logic.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg?style=flat-square)](https://python.org)
 [![IDA Pro 9.x](https://img.shields.io/badge/IDA_Pro-9.x-blueviolet?style=flat-square)](https://hex-rays.com)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Endpoints](https://img.shields.io/badge/endpoints-90+-orange?style=flat-square)](#api-coverage)
-[![MCP](https://img.shields.io/badge/MCP-Compatible-00ff41?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJ3aGl0ZSI+PHBhdGggZD0iTTEyIDJMMyA3djEwbDkgNSA5LTVWN3oiLz48L3N2Zz4=)](#mcp-server)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-00ff41?style=flat-square)](#mcp-server)
+[![Backends](https://img.shields.io/badge/backends-5-ff6b6b?style=flat-square)](#ai-backends)
 
 ---
 
-## What is this?
+## One Command. Full Analysis.
 
-A lightweight HTTP server plugin for **IDA Pro 9.x** that exposes **90+ REST endpoints** covering the entire IDA SDK — decompilation, cross-references, type system, debugger, microcode IR, and more. Paired with an AI agent powered by Google Gemini, it enables **fully autonomous reverse engineering**.
-
-```
-┌─────────────────────────────────────────────────┐
-│                 IDA Pro 9.x                     │
-│  ┌───────────────────────────────────────────┐  │
-│  │  antigravity_server.py (HTTP Plugin)      │  │
-│  │  ThreadingHTTPServer on 127.0.0.1:13370   │  │
-│  │  Bearer token authentication              │  │
-│  │  90+ REST endpoints (GET/POST)            │  │
-│  └──────────────────┬────────────────────────┘  │
-└─────────────────────┼───────────────────────────┘
-                      │ JSON/HTTP
-    ┌─────────┬───────┼───────┬──────────────┐
-    ▼         ▼       ▼       ▼              ▼
-bridge_cli  MCP     agent    swarm     Any HTTP
-(Terminal) Server  (Gemini)  (Bulk)     client
-             │
-   ┌─────────┼─────────┐
-   ▼         ▼         ▼
- Claude   Cursor     Cline
-Desktop  /Windsurf   /etc
+```bash
+python autopilot.py malware.exe "recover all C2 communication logic"
 ```
 
-## Features
+That's it. Autopilot will:
+1. 🔍 **Find** IDA Pro on your system (registry, PATH, common dirs)
+2. 📦 **Install** the bridge plugin if needed
+3. 🚀 **Launch** IDA with your binary
+4. ⏳ **Wait** for analysis to complete
+5. 🤖 **Run** your AI agent against the binary
+6. 📄 **Save** a comprehensive report
 
-- **90+ REST Endpoints** — Decompilation, ctree AST, microcode IR, xrefs, types, structs, enums, debugger, patching
-- **Turing-Complete `/api/exec`** — Execute arbitrary IDAPython scripts over HTTP
-- **Thread-Safe** — All IDA SDK calls dispatched via `execute_sync()`, server uses `ThreadingHTTPServer`
-- **Authenticated** — Auto-generated Bearer token prevents CSRF/localhost attacks
-- **AI Swarm Worker** — Multi-threaded bulk function analysis with Gemini Pro
-- **Autonomous Agent** — ReAct-loop orchestrator with function calling and full API schema
-- **Self-Documenting** — `/api/schema` endpoint serves the complete API specification
-- **Batch Mutations** — Atomic operations with rollback support
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        AUTOPILOT                                │
+│  python autopilot.py binary.exe "find vulnerabilities"          │
+│                          │                                      │
+│              ┌───────────┴───────────┐                          │
+│              ▼                       ▼                          │
+│     ┌─────────────┐        ┌─────────────────┐                 │
+│     │ Find IDA Pro │        │ Select Backend  │                 │
+│     │ (auto-scan)  │        │ (auto-detect)   │                 │
+│     └──────┬──────┘        └────────┬────────┘                 │
+│            ▼                        │                           │
+│     ┌─────────────┐                │                           │
+│     │ Launch IDA   │                │                           │
+│     │ + Plugin     │                │                           │
+│     └──────┬──────┘                │                           │
+│            ▼                        │                           │
+│     ┌─────────────┐                │                           │
+│     │ Wait for     │                │                           │
+│     │ Bridge       │◄───────────────┘                           │
+│     └──────┬──────┘                                            │
+│            ▼                                                    │
+│     ┌─────────────┐                                            │
+│     │ AI Analysis  │──── report.md                              │
+│     └─────────────┘                                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Architecture
+
+```
+antigravity-ida-bridge/
+├── ida_plugin/
+│   └── antigravity_server.py       # IDA Pro HTTP plugin (90+ endpoints)
+├── core/
+│   ├── client.py                   # Reusable HTTP client
+│   └── schema.py                   # API schema loader & prompt generator
+├── backends/
+│   ├── base.py                     # Abstract backend + registry
+│   ├── ollama_backend.py           # 🏠 Local LLM (free, private)
+│   ├── gemini_backend.py           # ☁️  Google Gemini
+│   ├── openai_backend.py           # ☁️  OpenAI GPT-4o / o3
+│   ├── anthropic_backend.py        # ☁️  Anthropic Claude
+│   └── deepseek_backend.py         # ☁️  DeepSeek V3/R1
+├── integrations/
+│   ├── mcp_server.py               # MCP — Claude Desktop, Cursor, Cline
+│   └── ide_extension.py            # Antigravity IDE / VS Code bridge
+├── autopilot.py                    # 🚀 One-command autonomous analysis
+├── agent.py                        # Interactive multi-backend agent
+├── bridge_cli.py                   # Terminal CLI client
+├── swarm_worker.py                 # Bulk AI analyzer
+└── api_schema.json                 # Machine-readable API spec
+```
+
+## AI Backends
+
+| Backend | Type | Models | Env Variable | Function Calling |
+|:--------|:-----|:-------|:-------------|:-----------------|
+| **Ollama** | 🏠 Local | llama3.1, qwen2.5, mistral, codestral | — (auto-detect) | ✅ Native |
+| **Gemini** | ☁️ Cloud | gemini-3.1-pro, gemini-3-flash | `GEMINI_API_KEY` | ✅ Native |
+| **OpenAI** | ☁️ Cloud | gpt-4o, o3, o4-mini | `OPENAI_API_KEY` | ✅ Native |
+| **Anthropic** | ☁️ Cloud | claude-sonnet-4, claude-opus | `ANTHROPIC_API_KEY` | ✅ Native |
+| **DeepSeek** | ☁️ Cloud | deepseek-chat, deepseek-reasoner | `DEEPSEEK_API_KEY` | ✅ Native |
+
+### Auto-Detection
+
+```bash
+python agent.py                    # Auto-selects best available backend
+python agent.py --list-backends    # Show what's available
+python agent.py --backend ollama --model qwen2.5:72b
+```
+
+Priority: Ollama (free) → Gemini → OpenAI → Anthropic → DeepSeek
 
 ## Quick Start
 
-### 1. Install the IDA Plugin
+### 1. Install Plugin
 
-Copy `ida_plugin/antigravity_server.py` → your IDA `plugins/` folder.
-
-Or load manually: **File → Script File → antigravity_server.py**
-
-You'll see in IDA's output:
-```
-[Antigravity] ✅ Bridge server started on http://127.0.0.1:13370
-[Antigravity] 🔑 Auth token: a1b2c3d4e5f6...
-[Antigravity] 🔑 Token file: C:\Users\...\Temp\.antigravity_token
+```bash
+# Copy to IDA plugins folder (or let autopilot do it automatically)
+cp ida_plugin/antigravity_server.py "C:\Program Files\IDA Pro 9.0\plugins\"
 ```
 
-### 2. Install Python Dependencies
+### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
+
+# Or install only what you need:
+pip install requests                    # Core (required)
+pip install ollama                      # Local LLM
+pip install google-genai                # Gemini
+pip install openai                      # OpenAI / DeepSeek
+pip install anthropic                   # Claude
+pip install fastmcp                     # MCP Server
 ```
 
-### 3. Use from Terminal
+### 3. Autonomous Analysis (Autopilot)
+
+```bash
+# Full autopilot — finds IDA, launches, analyzes
+python autopilot.py malware.exe "find all C2 communication and encryption routines"
+
+# With specific backend
+python autopilot.py firmware.bin "map bootloader entry" --backend ollama
+
+# Save report
+python autopilot.py sample.dll "document all exports" -o report.md
+
+# IDA already running
+python autopilot.py --skip-launch "explain the main function"
+
+# Just find IDA installation
+python autopilot.py --find-ida
+```
+
+### 4. Interactive Agent
+
+```bash
+python agent.py --backend gemini
+
+[User]> Find all functions that reference "CreateRemoteThread"
+[Agent is thinking...]
+[+] [Gemini] Bridge call: GET /api/strings?filter=CreateRemoteThread
+[Agent]> I found 3 functions referencing CreateRemoteThread...
+
+[User]> switch ollama
+[+] Switched to Ollama (Local) (llama3.1)
+```
+
+### 5. Terminal CLI
 
 ```bash
 python bridge_cli.py ping
 python bridge_cli.py info
 python bridge_cli.py pseudocode 0x140001000
 python bridge_cli.py strings --filter "password"
-python bridge_cli.py exec my_script.py
 ```
 
-### 4. Launch AI Agent
+### 6. Bulk AI Analysis (Swarm)
 
 ```bash
-set GEMINI_API_KEY=your_key_here
-python agent_orchestrator.py
-```
-
-```
-[User]> Find all functions that reference "CreateRemoteThread" and explain what they do
-[Agent is thinking...]
-[+] Agent calling bridge: GET /api/strings?filter=CreateRemoteThread
-[+] Agent calling bridge: GET /api/function/0x140005A00/pseudocode
-[Agent]> I found 3 functions referencing CreateRemoteThread...
-```
-
-### 5. Bulk AI Analysis (Swarm)
-
-```bash
-set GEMINI_API_KEY=your_key_here
+set GEMINI_API_KEY=your_key
 python swarm_worker.py --limit 200 --workers 5
 ```
 
 ## MCP Server
 
-The bridge includes a **Model Context Protocol (MCP)** server, making IDA Pro accessible to **any MCP-compatible AI client** — Claude Desktop, Cursor, Cline, Windsurf, and more.
+Universal AI client interface — works with **Claude Desktop**, **Cursor**, **Cline**, **Windsurf**, and any MCP-compatible client.
 
-### Setup for Claude Desktop
+### Claude Desktop
 
-Add to your `claude_desktop_config.json`:
-
+Add to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "ida-bridge": {
       "command": "python",
-      "args": ["C:/path/to/mcp_server.py"]
+      "args": ["C:/path/to/integrations/mcp_server.py"]
     }
   }
 }
 ```
 
-### Setup for Cursor
+### Cursor / Windsurf
 
-Add to `.cursor/mcp.json` in your project:
-
+Add to `.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
     "ida-bridge": {
       "command": "python",
-      "args": ["C:/path/to/mcp_server.py"]
+      "args": ["C:/path/to/integrations/mcp_server.py"]
     }
   }
 }
 ```
 
-### Available MCP Tools (45)
+### 45 MCP Tools
 
 | Category | Tools |
 |:---------|:------|
@@ -145,6 +214,38 @@ Add to `.cursor/mcp.json` in your project:
 | **Mutations** | `rename_function`, `comment_function`, `rename_variable`, `set_variable_type`, `set_function_type`, `patch_bytes`, `batch_mutations` |
 | **Debugger** | `dbg_start`, `dbg_set_breakpoint`, `dbg_continue`, `dbg_step_into`, `dbg_step_over`, `dbg_get_registers`, `dbg_read_memory`, `dbg_get_stack` |
 | **Utility** | `execute_idapython`, `undo`, `redo`, `navigate_to`, `save_database` |
+
+## IDE Integration
+
+### Antigravity IDE / VS Code
+
+```bash
+# Generate workspace config files
+python integrations/ide_extension.py init .
+
+# Creates:
+#   .antigravity/config.json    — Bridge settings
+#   .vscode/settings.json       — VS Code/Antigravity settings
+#   .cursor/mcp.json            — Cursor MCP config
+```
+
+### Programmatic Use
+
+```python
+from autopilot import run
+
+# One function call — full autonomous analysis
+result = run("C:/samples/malware.exe", "find all C2 communication logic")
+
+# With options
+result = run(
+    "firmware.bin",
+    "map the bootloader",
+    backend="ollama",
+    model="qwen2.5:72b",
+    output="report.md"
+)
+```
 
 ## API Coverage
 
@@ -184,31 +285,19 @@ Add to `.cursor/mcp.json` in your project:
 
 </details>
 
-## Architecture
-
-| File | Purpose |
-|:-----|:--------|
-| `ida_plugin/antigravity_server.py` | IDA Pro HTTP plugin (2000+ lines, all-in-one) |
-| `mcp_server.py` | **MCP server — universal AI client interface** |
-| `bridge_cli.py` | Python client library + CLI |
-| `agent_orchestrator.py` | Autonomous AI agent with Gemini function calling |
-| `swarm_worker.py` | Multi-threaded bulk AI analyzer |
-| `api_schema.json` | Machine-readable API spec (used as AI system prompt) |
-
 ## Security
 
-- **Bearer Token Auth** — Auto-generated on each IDA session, stored in temp file
+- **Bearer Token Auth** — Auto-generated per session, stored in temp file
 - **Localhost Only** — Binds to `127.0.0.1`, not exposed to network
+- **Path Hardening** — Directory traversal and UNC path protection
 - **CORS Headers** — Configurable cross-origin policy
-- **Ping/Schema exempt** — Only discovery endpoints work without auth
 
 ## Requirements
 
 - IDA Pro 9.x with Hex-Rays Decompiler
 - Python 3.10+
-- `requests` (for CLI/agent/MCP)
-- `fastmcp>=3.0` (for MCP server)
-- `google-genai` (for Gemini AI agent)
+- `requests` (core)
+- Backend-specific packages (see [AI Backends](#ai-backends))
 
 ## License
 

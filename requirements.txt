@@ -1,4 +1,29 @@
+# ============================================================
+# Antigravity IDA Bridge — Requirements
+# ============================================================
+# Install all: pip install -r requirements.txt
+# Install minimal: pip install requests
+# ============================================================
+
+# ── Core (always needed) ─────────────────────────────────────
 requests>=2.28.0
+
+# ── AI Backends (install what you need) ──────────────────────
+# Google Gemini
 google-genai>=1.0.0
-pydantic>=2.0.0
+
+# OpenAI GPT-4o / o3 / o4-mini
+openai>=1.0.0
+
+# Anthropic Claude
+anthropic>=0.40.0
+
+# Local LLM via Ollama
+ollama>=0.4.0
+
+# DeepSeek (uses openai package with custom base_url)
+# No extra dependency needed — uses openai package above
+
+# ── Integrations ─────────────────────────────────────────────
+# MCP Server (Claude Desktop, Cursor, Cline, Windsurf)
 fastmcp>=3.0.0
