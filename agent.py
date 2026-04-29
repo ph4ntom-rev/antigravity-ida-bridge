@@ -150,6 +150,9 @@ def main():
         except KeyboardInterrupt:
             print("\n[+] Exiting...")
             break
+        except EOFError:
+            print("\n[+] End of input. Exiting...")
+            break
         except Exception as e:
             print(f"\n[-] Error: {e}\n")
 
