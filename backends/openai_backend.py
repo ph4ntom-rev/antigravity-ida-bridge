@@ -3,10 +3,17 @@ Antigravity IDA Bridge — OpenAI Backend
 =========================================
 OpenAI GPT-4o, o3, o4-mini with function calling.
 Also used as base for DeepSeek (compatible API).
+
+Changes (v5.2):
+- Uses centralized tool schema from base class
+- exclude_none=True on model_dump() to prevent 400 Bad Request
+- Fault-tolerant tool execution via _execute_tool()
+- Proper reset() lifecycle
 """
 
 import os
 import json
+from typing import Optional
 from .base import AgentBackend
 
 try:
@@ -20,110 +27,59 @@ except ImportError:
 @AgentBackend.register("openai")
 class OpenAIBackend(AgentBackend):
 
-    @property
-    def name(self) -> str:
+    @classmethod
+    def get_name(cls) -> str:
         return "OpenAI"
 
-    @property
-    def default_model(self) -> str:
+    @classmethod
+    def get_default_model(cls) -> str:
         return os.environ.get("OPENAI_MODEL", "gpt-4o")
 
-    @property
-    def api_key_env(self) -> str:
+    @classmethod
+    def get_api_key_env(cls) -> str:
         return "OPENAI_API_KEY"
 
-    @property
-    def base_url(self) -> str:
+    @classmethod
+    def is_available(cls) -> bool:
+        return HAS_OPENAI and bool(os.environ.get(cls.get_api_key_env()))
+
+    def get_base_url(self) -> Optional[str]:
         return None  # Uses default OpenAI URL
 
-    def is_available(self) -> bool:
-        return HAS_OPENAI and bool(os.environ.get(self.api_key_env))
-
-    def _get_client(self) -> OpenAI:
-        return OpenAI(
-            api_key=os.environ.get(self.api_key_env, ""),
-            base_url=self.base_url,
-        )
-
-    def _get_tools_schema(self) -> list:
-        """OpenAI function calling tool definitions."""
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "call_bridge_api",
-                    "description": "Call any Antigravity IDA Bridge REST endpoint.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "method": {"type": "string", "enum": ["GET", "POST"]},
-                            "path": {"type": "string", "description": "API path"},
-                            "body": {"type": "string", "description": "JSON body for POST", "default": "{}"},
-                        },
-                        "required": ["method", "path"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "execute_idapython",
-                    "description": "Execute IDAPython script in IDA Pro. Use result dict to return data.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "script_code": {"type": "string", "description": "Python script"},
-                        },
-                        "required": ["script_code"],
-                    },
-                },
-            },
-        ]
+    def reset(self) -> None:
+        super().reset()
+        self._client = OpenAI(
+            api_key=os.environ.get(self.get_api_key_env(), ""),
+            base_url=self.get_base_url(),
+        ) if self.is_available() else None
 
     def chat(self, message: str) -> str:
-        if not hasattr(self, "_messages"):
-            self._client = self._get_client()
-            self._messages = [
-                {"role": "system", "content": self.get_system_prompt()},
-            ]
+        if not getattr(self, "_client", None):
+            return "[Error: OpenAI client not initialized]"
 
-        self._messages.append({"role": "user", "content": message})
-
-        available_functions = {
-            "call_bridge_api": self.call_bridge_api,
-            "execute_idapython": self.execute_idapython,
-        }
+        self.history.append({"role": "user", "content": message})
 
         max_iterations = 10
         for _ in range(max_iterations):
             response = self._client.chat.completions.create(
                 model=self.model,
-                messages=self._messages,
-                tools=self._get_tools_schema(),
+                messages=self.history,
+                tools=self.get_common_tools(),
                 temperature=0.2,
             )
 
-            choice = response.choices[0]
-            msg = choice.message
+            msg = response.choices[0].message
 
             if not msg.tool_calls:
-                self._messages.append({"role": "assistant", "content": msg.content})
+                self.history.append({"role": "assistant", "content": msg.content or ""})
                 return msg.content or ""
 
-            # Process tool calls
-            self._messages.append(msg.model_dump())
+            # exclude_none=True prevents sending function_call=None (fixes 400 Bad Request)
+            self.history.append(msg.model_dump(exclude_none=True))
 
             for tool_call in msg.tool_calls:
-                func_name = tool_call.function.name
-                func_args = json.loads(tool_call.function.arguments)
-                func = available_functions.get(func_name)
-
-                if func:
-                    result = func(**func_args)
-                else:
-                    result = json.dumps({"error": f"Unknown function: {func_name}"})
-
-                self._messages.append({
+                result = self._execute_tool(tool_call.function.name, tool_call.function.arguments)
+                self.history.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "content": result,
