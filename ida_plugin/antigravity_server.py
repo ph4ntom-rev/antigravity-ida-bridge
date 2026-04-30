@@ -1631,11 +1631,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
         safe_read(lambda: ida_kernwin.msg(f"[Antigravity] {msg}\n"))
 
     def send_json(self, data, status=200):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            pass  # Client disconnected — silently ignore
 
     def send_error_json(self, message, status=400):
         self.send_json({"error": message}, status)
@@ -1851,8 +1854,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     self.send_error_json(str(e), 500)
             else:
                 self.send_error_json(f"Unknown endpoint: {path}", 404)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            pass  # Client disconnected
         except Exception as e:
-            self.send_json({"error": str(e), "traceback": traceback.format_exc()}, 500)
+            try:
+                self.send_json({"error": str(e), "traceback": traceback.format_exc()}, 500)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+                pass
 
     def do_POST(self):
         if not self._check_auth():
@@ -2040,8 +2048,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
             else:
                 self.send_error_json(f"Unknown endpoint: {path}", 404)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            pass  # Client disconnected
         except Exception as e:
-            self.send_json({"error": str(e), "traceback": traceback.format_exc()}, 500)
+            try:
+                self.send_json({"error": str(e), "traceback": traceback.format_exc()}, 500)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+                pass
 
 # ─── Server Lifecycle ────────────────────────────────────────────────────────
 
