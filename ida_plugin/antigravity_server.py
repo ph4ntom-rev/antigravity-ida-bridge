@@ -33,7 +33,6 @@ import ida_entry
 import ida_idaapi
 import ida_auto
 import ida_lines
-import ida_xref
 import ida_typeinf
 try:
     import ida_range
@@ -73,7 +72,7 @@ def safe_read(func):
     def wrapper():
         try:
             result[0] = func()
-        except Exception as e:
+        except Exception :
             error[0] = traceback.format_exc()
     ida_kernwin.execute_sync(wrapper, ida_kernwin.MFF_READ)
     if error[0]:
@@ -87,7 +86,7 @@ def safe_write(func):
     def wrapper():
         try:
             result[0] = func()
-        except Exception as e:
+        except Exception :
             error[0] = traceback.format_exc()
     ida_kernwin.execute_sync(wrapper, ida_kernwin.MFF_WRITE)
     if error[0]:
@@ -646,8 +645,6 @@ def rename_local_var(func_ea, old_name, new_name):
 def create_struct(c_definition):
     """Create a structure from C syntax."""
     def _inner():
-        til = ida_typeinf.get_idati()
-        errors = None
         try:
             count = idc.parse_decls(c_definition, idc.PT_TYP)
         except Exception as e:
@@ -804,7 +801,7 @@ def get_switch_info(ea):
         if not si:
             return {"error": f"No switch at {hex(ea)}"}
         cases = []
-        results = idc.get_switch_info(ea)
+        idc.get_switch_info(ea)
         jt = si.jumps
         ncases = si.get_jtable_size()
         for i in range(ncases):
@@ -859,9 +856,6 @@ def search_text_in_disasm(text, max_results=50):
 def get_global_vars(max_count=500):
     """Get global variables (named data items)."""
     def _inner():
-        import ida_ida
-        min_ea = ida_ida.inf_get_min_ea() if hasattr(ida_ida, 'inf_get_min_ea') else 0
-        max_ea = ida_ida.inf_get_max_ea() if hasattr(ida_ida, 'inf_get_max_ea') else 0xFFFFFFFF
         gvars = []
         count = 0
         for ea, name in idautils.Names():
@@ -1116,7 +1110,7 @@ def execute_dynamic_python(script_code):
         error_msg = ""
         try:
             exec(script_code, globals(), local_vars)
-        except Exception as e:
+        except Exception :
             success = False
             error_msg = traceback.format_exc()
         finally:
@@ -1194,7 +1188,7 @@ def set_lvar_comment_api(func_ea, var_name, cmt):
     if not HAS_HEXRAYS: return {"error": "Hex-Rays not available"}
     def _inner():
         try: cfunc = ida_hexrays.decompile(func_ea)
-        except: return {"error": f"Decompile failed"}
+        except: return {"error": "Decompile failed"}
         if not cfunc: return {"error": "None"}
         for lv in cfunc.lvars:
             if lv.name == var_name:
@@ -1382,7 +1376,7 @@ def get_code_xrefs(ea):
 
 def _dbg_available():
     try:
-        import ida_dbg
+        import ida_dbg  # noqa: F401
         return True
     except: return False
 
@@ -1504,7 +1498,7 @@ def dbg_get_threads():
 
 def dbg_get_stack():
     def _inner():
-        import ida_dbg, ida_idd
+        import ida_dbg
         trace = ida_dbg.call_stack_t()
         ok = ida_dbg.get_call_stack(trace)
         if not ok: return {"error":"Cannot get call stack"}
@@ -2061,7 +2055,7 @@ def start_server(host=HOST, port=PORT):
     print(f"[Antigravity] ✅ Bridge server started on http://{host}:{port}")
     print(f"[Antigravity] 🔑 Auth token: {AUTH_TOKEN}")
     print(f"[Antigravity] 🔑 Token file: {_token_path}")
-    print(f"[Antigravity] Endpoints: /api/info, /api/functions, /api/function/<ea>/pseudocode, ...")
+    print("[Antigravity] Endpoints: /api/info, /api/functions, /api/function/<ea>/pseudocode, ...")
     ida_kernwin.msg(f"[Antigravity] Bridge server started on http://{host}:{port}\n")
 
 def stop_server():
@@ -2088,7 +2082,6 @@ class AntigravityPlugin(ida_idaapi.plugin_t):
         return ida_idaapi.PLUGIN_KEEP
 
     def run(self, arg):
-        global _server
         if _server is None:
             start_server()
         else:

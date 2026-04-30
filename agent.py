@@ -39,9 +39,9 @@ def list_backends():
     """Print available backends and their status."""
     print_banner()
     print("\nAvailable Backends:\n")
-    backends = AgentBackend.list_backends()
+    available_backends = AgentBackend.list_backends()
     
-    for key, info in backends.items():
+    for key, info in available_backends.items():
         status = "[OK] READY" if info.get("available") else "[--] NOT CONFIGURED"
         model = info.get("model", "?")
         name = info.get("name", key)
