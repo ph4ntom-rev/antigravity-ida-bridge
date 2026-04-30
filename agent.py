@@ -1,161 +1,496 @@
 """
-Antigravity IDA Bridge v5.1 — Unified AI Agent
-================================================
-Single entry point for all AI backends.
-
-Usage:
-    python agent.py                          # Auto-detect best backend
-    python agent.py --backend ollama         # Use local Ollama
-    python agent.py --backend gemini         # Use Google Gemini
-    python agent.py --backend openai         # Use OpenAI GPT-4o
-    python agent.py --backend anthropic      # Use Anthropic Claude
-    python agent.py --backend deepseek       # Use DeepSeek
-    python agent.py --list-backends          # Show available backends
-    python agent.py --backend ollama --model qwen2.5:72b
+Antigravity IDA Bridge — Agent Backends
+===========================================
+Unified, fault-tolerant backend architecture for AI Agents.
+Supports OpenAI, DeepSeek, Anthropic, Gemini, and Ollama.
 """
 
-import sys
-import argparse
+import os
+import json
+import logging
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List, Optional, Type, Union
 
 from core.client import BridgeClient
 from core.schema import SchemaLoader
-from backends.base import AgentBackend
 
-# Import all backends to trigger registration
-import backends.gemini_backend      # noqa: F401
-import backends.ollama_backend      # noqa: F401
-import backends.openai_backend      # noqa: F401
-import backends.anthropic_backend   # noqa: F401
-import backends.deepseek_backend    # noqa: F401
+# Настройка логгера
+logger = logging.getLogger("Antigravity.Bridge")
+
+# ── Флаги доступности SDK ──────────────────────────────────────────────
+try:
+    from openai import OpenAI
+    HAS_OPENAI = True
+except ImportError:
+    OpenAI, HAS_OPENAI = None, False
+
+try:
+    from google import genai
+    from google.genai import types
+    HAS_GENAI = True
+except ImportError:
+    genai, types, HAS_GENAI = None, None, False
+
+try:
+    import ollama as ollama_sdk
+    HAS_OLLAMA = True
+except ImportError:
+    ollama_sdk, HAS_OLLAMA = None, False
+
+try:
+    import anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    anthropic, HAS_ANTHROPIC = None, False
 
 
-def print_banner():
-    print("=" * 58)
-    print("  Antigravity IDA Bridge v5.1 — Multi-Backend AI Agent")
-    print("=" * 58)
+# ==============================================================================
+# ABSTRACT BASE CLASS
+# ==============================================================================
 
-
-def list_backends():
-    """Print available backends and their status."""
-    print_banner()
-    print("\nAvailable Backends:\n")
-    backends = AgentBackend.list_backends()
+class AgentBackend(ABC):
+    """Abstract base class for all AI agent backends."""
     
-    for key, info in backends.items():
-        status = "[OK] READY" if info.get("available") else "[--] NOT CONFIGURED"
-        model = info.get("model", "?")
-        name = info.get("name", key)
-        print(f"  {key:12s}  {name:20s}  model: {model:30s}  {status}")
+    _registry: Dict[str, Type['AgentBackend']] = {}
 
-    print("\nUsage:")
-    print("  python agent.py --backend <name>")
-    print("  python agent.py --backend <name> --model <model_id>")
+    def __init__(self, client: Optional[BridgeClient] = None, schema: Optional[SchemaLoader] = None, model: Optional[str] = None):
+        self.client = client or BridgeClient()
+        self.schema = schema or SchemaLoader()
+        self.model = model or self.get_default_model()
+        self.history: List[Dict[str, Any]] = []
+        self.reset()
 
+    # ── Метаданные (Class Methods, избавляют от __new__ хаков) ──
 
-def main():
-    parser = argparse.ArgumentParser(description="Antigravity IDA Bridge — AI Agent")
-    parser.add_argument("--backend", "-b", default="auto",
-                        help="Backend to use: ollama, gemini, openai, anthropic, deepseek, auto")
-    parser.add_argument("--model", "-m", default=None,
-                        help="Override model name (e.g., llama3.1, gpt-4o, claude-sonnet-4)")
-    parser.add_argument("--list-backends", "-l", action="store_true",
-                        help="List available backends and exit")
-    parser.add_argument("--url", default=None,
-                        help="IDA Bridge URL (default: http://127.0.0.1:13370)")
-    args = parser.parse_args()
+    @classmethod
+    @abstractmethod
+    def get_name(cls) -> str: pass
 
-    if args.list_backends:
-        list_backends()
-        sys.exit(0)
+    @classmethod
+    @abstractmethod
+    def get_default_model(cls) -> str: pass
 
-    print_banner()
+    @classmethod
+    @abstractmethod
+    def is_available(cls) -> bool: pass
 
-    # Initialize core
-    client = BridgeClient(url=args.url)
-    schema = SchemaLoader()
+    @classmethod
+    def register(cls, name: str):
+        def decorator(subclass: Type['AgentBackend']):
+            cls._registry[name] = subclass
+            return subclass
+        return decorator
 
-    # Check bridge connectivity
-    ping = client.ping()
-    if "error" in ping:
-        print(f"\n[!] Bridge offline: {ping['error']}")
-        print("    Make sure antigravity_server.py is loaded in IDA Pro.")
-    else:
-        print(f"\n[+] Bridge ONLINE (v{ping.get('version', '?')})")
-        info = client.info()
-        if "error" not in info:
-            print(f"    Binary: {info.get('file', '?')}")
-            print(f"    Arch: {info.get('proc', '?')} {info.get('bits', '?')}-bit")
+    @classmethod
+    def list_backends(cls) -> dict:
+        """Безопасный опрос доступных бэкендов без аллокации памяти (O(1))."""
+        return {
+            name: {
+                "name": b_cls.get_name(),
+                "model": b_cls.get_default_model(),
+                "available": b_cls.is_available(),
+            } for name, b_cls in cls._registry.items()
+        }
 
-    # Schema info
-    if schema.is_loaded:
-        r, w = schema.endpoint_count
-        print(f"[+] Schema loaded ({r} read + {w} write endpoints)")
-    else:
-        print("[!] api_schema.json not found — using minimal prompt")
+    @classmethod
+    def auto_select(cls) -> Optional[str]:
+        priority = ["ollama", "gemini", "openai", "anthropic", "deepseek"]
+        for name in priority:
+            if (b_cls := cls._registry.get(name)) and b_cls.is_available():
+                return name
+        return None
 
-    # Select backend
-    backend_name = args.backend
-    if backend_name == "auto":
-        backend_name = AgentBackend.auto_select()
-        if not backend_name:
-            print("\n[-] No backend available!")
-            print("    Set one of: GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY")
-            print("    Or install Ollama: https://ollama.com")
-            print("\n    Run: python agent.py --list-backends")
-            sys.exit(1)
-        print(f"[+] Auto-selected backend: {backend_name}")
+    # ── Жизненный цикл и Интерфейс ──
 
-    backend_cls = AgentBackend.get_backend(backend_name)
-    if not backend_cls:
-        print(f"\n[-] Unknown backend: {backend_name}")
-        print("    Available: ollama, gemini, openai, anthropic, deepseek")
-        sys.exit(1)
+    def reset(self) -> None:
+        """Сброс истории для освобождения контекстного окна."""
+        self.history = [{"role": "system", "content": self.get_system_prompt()}]
 
-    backend = backend_cls(client=client, schema=schema, model=args.model)
+    @abstractmethod
+    def chat(self, message: str) -> str: pass
 
-    if not backend.is_available():
-        print(f"\n[-] Backend '{backend_name}' is not configured.")
-        if backend_name == "ollama":
-            print("    Make sure Ollama is running: https://ollama.com")
-        else:
-            env_var = getattr(backend, "api_key_env", f"{backend_name.upper()}_API_KEY")
-            print(f"    Set environment variable: {env_var}")
-        sys.exit(1)
+    # ── Фабрика Инструментов (Паттерн DRY) ──
 
-    print(f"\n[+] Agent ready | Backend: {backend.name} | Model: {backend.model}")
-    print("    Type 'exit' to quit, 'switch <backend>' to change backend\n")
+    @classmethod
+    def get_common_tools(cls) -> List[Dict[str, Any]]:
+        """Единый источник истины. Разные SDK конвертируют это под себя."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "call_bridge_api",
+                    "description": "Call any Antigravity IDA Bridge REST endpoint.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "method": {"type": "string", "enum": ["GET", "POST"]},
+                            "path": {"type": "string", "description": "API path"},
+                            "body": {"type": "string", "description": "JSON body", "default": "{}"},
+                        },
+                        "required": ["method", "path"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "execute_idapython",
+                    "description": "Execute arbitrary IDAPython script in IDA Pro.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "script_code": {"type": "string", "description": "Python script code"},
+                        },
+                        "required": ["script_code"],
+                    },
+                },
+            },
+        ]
 
-    # Chat loop
-    while True:
+    # ── Безопасный Диспетчер Инструментов (Fault-Tolerance) ──
+
+    def _execute_tool(self, func_name: str, func_args: Union[str, Dict[str, Any]]) -> str:
+        """
+        Перехватывает ошибки LLM (битый JSON) и падения Python.
+        Возвращает ошибки обратно нейросети для самокоррекции.
+        """
+        available_functions = {
+            "call_bridge_api": self.call_bridge_api,
+            "execute_idapython": self.execute_idapython,
+        }
+
+        func = available_functions.get(func_name)
+        if not func:
+            return json.dumps({"error": f"Unknown function requested: {func_name}"})
+
+        if isinstance(func_args, str):
+            try:
+                func_args = json.loads(func_args) if func_args.strip() else {}
+            except json.JSONDecodeError as e:
+                logger.warning(f"LLM hallucinated invalid JSON args for {func_name}")
+                return json.dumps({"error": f"Invalid JSON syntax: {str(e)}. Please fix."})
+
+        if not isinstance(func_args, dict):
+            func_args = {}
+
         try:
-            user_input = input("[User]> ")
-            if not user_input.strip():
-                continue
-            if user_input.lower() in ["exit", "quit"]:
-                break
-            if user_input.lower().startswith("switch "):
-                new_backend = user_input.split(" ", 1)[1].strip()
-                new_cls = AgentBackend.get_backend(new_backend)
-                if new_cls:
-                    backend = new_cls(client=client, schema=schema)
-                    print(f"[+] Switched to {backend.name} ({backend.model})")
-                else:
-                    print(f"[-] Unknown backend: {new_backend}")
-                continue
-
-            print("\n[Agent is thinking...]\n")
-            response = backend.chat(user_input)
-            print(f"\n[Agent]> {response}\n")
-
-        except KeyboardInterrupt:
-            print("\n[+] Exiting...")
-            break
-        except EOFError:
-            print("\n[+] End of input. Exiting...")
-            break
+            result = func(**func_args)
+            return result if isinstance(result, str) else json.dumps(result)
+        except TypeError as e:
+            return json.dumps({"error": f"Invalid arguments passed: {str(e)}"})
         except Exception as e:
-            print(f"\n[-] Error: {e}\n")
+            logger.exception(f"Tool runtime exception in {func_name}")
+            return json.dumps({"error": f"Execution failed internally: {str(e)}"})
 
+    # ── Реализация Инструментов ──
+
+    def execute_idapython(self, script_code: str) -> str:
+        logger.info(f"[{self.get_name()}] Executing IDAPython script...")
+        try:
+            response = self.client.exec_python(script_code)
+            return json.dumps(response, indent=2)
+        except Exception as e:
+            return json.dumps({"error": f"Execution failed: {e}", "success": False})
+
+    def call_bridge_api(self, method: str, path: str, body: Union[str, dict] = "{}") -> str:
+        logger.info(f"[{self.get_name()}] Bridge call: {method} {path}")
+        
+        if isinstance(body, str):
+            try:
+                data = json.loads(body) if body.strip() and body != "{}" else None
+            except json.JSONDecodeError as e:
+                return json.dumps({"error": f"Malformed body JSON: {str(e)}", "success": False})
+        else:
+            data = body
+
+        try:
+            result = self.client.call_api(method, path, data)
+            result_str = json.dumps(result, indent=2)
+            logger.debug(f"Response: {result_str[:500]}..." if len(result_str) > 500 else f"Response: {result_str}")
+            return result_str
+        except Exception as e:
+            return json.dumps({"error": str(e), "success": False})
+
+    def get_system_prompt(self) -> str:
+        instructions = (
+            "You have two tools:\n"
+            "1. `call_bridge_api` — Use for structured REST endpoint interactions.\n"
+            "2. `execute_idapython` — Use for custom IDA logic via Python API.\n"
+            "Prefer `call_bridge_api` if an endpoint exists."
+        )
+        return self.schema.generate_system_prompt(instructions)
+
+
+# ==============================================================================
+# OPENAI BACKEND
+# ==============================================================================
+
+@AgentBackend.register("openai")
+class OpenAIBackend(AgentBackend):
+    
+    @classmethod
+    def get_name(cls) -> str: return "OpenAI"
+
+    @classmethod
+    def get_default_model(cls) -> str: return os.environ.get("OPENAI_MODEL", "gpt-4o")
+
+    @classmethod
+    def get_api_key_env(cls) -> str: return "OPENAI_API_KEY"
+
+    @classmethod
+    def is_available(cls) -> bool: return HAS_OPENAI and bool(os.environ.get(cls.get_api_key_env()))
+
+    def get_base_url(self) -> Optional[str]: return None
+
+    def reset(self) -> None:
+        super().reset()
+        self._client = OpenAI(
+            api_key=os.environ.get(self.get_api_key_env(), ""),
+            base_url=self.get_base_url(),
+        ) if self.is_available() else None
+
+    def chat(self, message: str) -> str:
+        if not getattr(self, "_client", None): return "[Error: OpenAI Client not initialized]"
+
+        self.history.append({"role": "user", "content": message})
+
+        for _ in range(10): # Лимит цикла от бесконечного вызова тулов
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=self.history,
+                tools=self.get_common_tools(),
+                temperature=0.2,
+            )
+
+            msg = response.choices[0].message
+            if not msg.tool_calls:
+                self.history.append({"role": "assistant", "content": msg.content or ""})
+                return msg.content or ""
+
+            self.history.append(msg.model_dump(exclude_none=True))
+
+            for tool_call in msg.tool_calls:
+                result = self._execute_tool(tool_call.function.name, tool_call.function.arguments)
+                self.history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result,
+                })
+
+        return "[Agent reached max iterations]"
+
+
+# ==============================================================================
+# DEEPSEEK BACKEND (Polymorphism)
+# ==============================================================================
+
+@AgentBackend.register("deepseek")
+class DeepSeekBackend(OpenAIBackend):
+    """Идеальное наследование OpenAI-совместимого бэкенда (DRY)."""
+
+    @classmethod
+    def get_name(cls) -> str: return "DeepSeek"
+
+    @classmethod
+    def get_default_model(cls) -> str: return os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+    @classmethod
+    def get_api_key_env(cls) -> str: return "DEEPSEEK_API_KEY"
+
+    def get_base_url(self) -> str: return "https://api.deepseek.com"
+
+
+# ==============================================================================
+# GEMINI BACKEND
+# ==============================================================================
+
+@AgentBackend.register("gemini")
+class GeminiBackend(AgentBackend):
+
+    @classmethod
+    def get_name(cls) -> str: return "Gemini"
+
+    @classmethod
+    def get_default_model(cls) -> str: return os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+
+    @classmethod
+    def is_available(cls) -> bool: return HAS_GENAI and bool(os.environ.get("GEMINI_API_KEY"))
+
+    def reset(self) -> None:
+        super().reset()
+        if not self.is_available():
+            self._chat_session = None
+            return
+
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        config = types.GenerateContentConfig(
+            system_instruction=self.get_system_prompt(),
+            tools=[self.execute_idapython, self.call_bridge_api],
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False),
+            temperature=0.2,
+        )
+        self._chat_session = client.chats.create(model=self.model, config=config)
+
+    def chat(self, message: str) -> str:
+        if getattr(self, "_chat_session", None) is None:
+            return "[Error: Gemini Client not initialized]"
+        
+        try:
+            return self._chat_session.send_message(message).text
+        except Exception as e:
+            logger.exception("Gemini execution failed")
+            return f"[Error: {str(e)}]"
+
+
+# ==============================================================================
+# OLLAMA BACKEND (LOCAL LLM)
+# ==============================================================================
+
+@AgentBackend.register("ollama")
+class OllamaBackend(AgentBackend):
+
+    @classmethod
+    def get_name(cls) -> str: return "Ollama (Local)"
+
+    @classmethod
+    def get_default_model(cls) -> str: return os.environ.get("OLLAMA_MODEL", "llama3.1")
+
+    @classmethod
+    def is_available(cls) -> bool:
+        if not HAS_OLLAMA: return False
+        try:
+            ollama_sdk.list()
+            return True
+        except Exception:
+            return False
+
+    def chat(self, message: str) -> str:
+        self.history.append({"role": "user", "content": message})
+
+        for _ in range(10):
+            response = ollama_sdk.chat(
+                model=self.model,
+                messages=self.history,
+                tools=self.get_common_tools(),
+            )
+            
+            msg = response.get("message") if isinstance(response, dict) else response.message
+            tool_calls = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
+
+            if not tool_calls:
+                content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+                self.history.append({"role": "assistant", "content": content})
+                return content
+
+            try:
+                self.history.append(msg.model_dump(exclude_none=True))
+            except AttributeError:
+                self.history.append(dict(msg))
+
+            for tool_call in tool_calls:
+                tc = tool_call if isinstance(tool_call, dict) else dict(tool_call)
+                func = tc.get("function", {})
+                
+                func_name = func.get("name", "") if isinstance(func, dict) else getattr(func, "name", "")
+                func_args = func.get("arguments", {}) if isinstance(func, dict) else getattr(func, "arguments", {})
+
+                result = self._execute_tool(func_name, func_args)
+                self.history.append({"role": "tool", "content": result})
+
+        return "[Agent reached max iterations]"
+
+
+# ==============================================================================
+# ANTHROPIC BACKEND
+# ==============================================================================
+
+@AgentBackend.register("anthropic")
+class AnthropicBackend(AgentBackend):
+
+    @classmethod
+    def get_name(cls) -> str: return "Anthropic Claude"
+
+    @classmethod
+    def get_default_model(cls) -> str: return os.environ.get("ANTHROPIC_MODEL", "claude-3-7-sonnet-20250219")
+
+    @classmethod
+    def is_available(cls) -> bool: return HAS_ANTHROPIC and bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    def reset(self) -> None:
+        self.history = []
+        self._system_prompt = self.get_system_prompt()
+        self._client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", "")) if self.is_available() else None
+
+    @classmethod
+    def get_anthropic_tools(cls) -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": t["function"]["name"],
+                "description": t["function"]["description"],
+                "input_schema": t["function"]["parameters"],
+            } for t in cls.get_common_tools()
+        ]
+
+    def chat(self, message: str) -> str:
+        if not getattr(self, "_client", None): return "[Error: Client is not initialized]"
+
+        self.history.append({"role": "user", "content": message})
+
+        for _ in range(10):
+            response = self._client.messages.create(
+                model=self.model,
+                max_tokens=8192,
+                system=self._system_prompt,
+                tools=self.get_anthropic_tools(),
+                messages=self.history,
+            )
+
+            if response.stop_reason == "tool_use":
+                self.history.append({"role": "assistant", "content": response.content})
+
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        result = self._execute_tool(block.name, block.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        })
+
+                self.history.append({"role": "user", "content": tool_results})
+            else:
+                text = "".join(block.text for block in response.content if hasattr(block, "text"))
+                self.history.append({"role": "assistant", "content": response.content})
+                return text
+
+        return "[Agent reached max iterations]"
 
 if __name__ == "__main__":
-    main()
+    # Example chat loop if run directly
+    backend_name = AgentBackend.auto_select()
+    if not backend_name:
+        print("No AI backends available. Set API keys.")
+        exit(1)
+        
+    backend_cls = AgentBackend.get_backend(backend_name)
+    agent = backend_cls()
+    print(f"Started interactive session with {backend_cls.get_name()} ({agent.model}).")
+    
+    while True:
+        try:
+            user_input = input("\n[You]> ")
+            if user_input.lower() in ["quit", "exit"]:
+                break
+            elif user_input.lower() in ["clear", "reset"]:
+                agent.reset()
+                print("--- Context cleared ---")
+                continue
+                
+            response = agent.chat(user_input)
+            print(f"\n[Agent]> {response}")
+            
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"Error: {e}")
