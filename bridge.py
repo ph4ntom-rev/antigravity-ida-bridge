@@ -118,7 +118,7 @@ def cmd_functions(limit=None, offset=0):
 
 def cmd_strings(filter_str=None):
     if filter_str:
-        out(api_get(f"/api/strings", filter=filter_str))
+        out(api_get("/api/strings", filter=filter_str))
     else:
         out(api_get("/api/strings"))
 
