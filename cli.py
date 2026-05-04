@@ -13,13 +13,9 @@ import subprocess
 from pathlib import Path
 from core.client import BridgeClient
 
-def format_output(data: dict) -> int:
-    """Универсальный форматер JSON вывода для CLI."""
-    if "error" in data and data["error"]:
-        print(f"ERROR: {data['error']}", file=sys.stderr)
-        return 1
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-    return 0
+def format_output(data: dict) -> str:
+    """Универсальный форматер JSON вывода для CLI (чистая функция)."""
+    return json.dumps(data, indent=2, ensure_ascii=False)
 
 def find_ida() -> str:
     """Надежный поиск бинарника IDA Pro."""
@@ -47,18 +43,18 @@ def find_ida() -> str:
         if path: return path
     return ""
 
-def cmd_launch(binary_path: str, client: BridgeClient):
+def cmd_launch(binary_path: str, client: BridgeClient) -> dict:
     """Безопасный запуск IDA Pro с перехватом прав доступа (Устранено скрытое падение)."""
     target = Path(binary_path).resolve()
     if not target.exists():
-        return format_output({"error": f"File not found: {target}"})
+        return {"error": f"File not found: {target}"}
 
     if "error" not in client.ping():
-        return format_output({"status": "already_online", "info": client.info()})
+        return {"status": "already_online", "info": client.info()}
 
     ida_exe = find_ida()
     if not ida_exe:
-        return format_output({"error": "IDA Pro not found. Set IDA_DIR env variable or add to PATH."})
+        return {"error": "IDA Pro not found. Set IDA_DIR env variable or add to PATH."}
 
     ida_dir = Path(ida_exe).parent
     plugin_src = Path(__file__).parent / "ida_plugin" / "antigravity_server.py"
@@ -70,11 +66,11 @@ def cmd_launch(binary_path: str, client: BridgeClient):
             plugin_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(plugin_src, plugin_dst)
         except PermissionError:
-            return format_output({"error": f"Permission denied installing plugin to {plugin_dst}. Run as Admin/Root."})
+            return {"error": f"Permission denied installing plugin to {plugin_dst}. Run as Admin/Root."}
 
     log_file = Path.home() / ".antigravity_ida.log"
     proc = subprocess.Popen([ida_exe, "-A", f"-L{log_file}", str(target)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return format_output({"status": "launched", "pid": proc.pid, "ida": str(ida_exe), "next": "Run: python cli.py wait"})
+    return {"status": "launched", "pid": proc.pid, "ida": str(ida_exe), "next": "Run: python cli.py wait"}
 
 def main():
     parser = argparse.ArgumentParser(description="Antigravity IDA Bridge CLI")
@@ -95,14 +91,20 @@ def main():
     args = parser.parse_args()
     client = BridgeClient(url=args.url)
 
-    if args.command == "launch": return cmd_launch(args.binary, client)
+    res = {}
+    if args.command == "launch":
+        res = cmd_launch(args.binary, client)
     elif args.command == "wait":
         start = time.time()
+        found = False
         while time.time() - start < args.timeout:
             if "error" not in client.ping():
-                return format_output({"online": True, "waited": round(time.time() - start, 1)})
+                res = {"online": True, "waited": round(time.time() - start, 1)}
+                found = True
+                break
             time.sleep(2)
-        return format_output({"error": f"Bridge timeout ({args.timeout}s)"})
+        if not found:
+            res = {"error": f"Bridge timeout ({args.timeout}s)"}
     
     # Диспетчеризация команд
     elif args.command == "ping": res = client.ping()
@@ -116,7 +118,12 @@ def main():
     else:
         res = {"error": f"Command '{args.command}' not implemented."}
         
-    return format_output(res)
+    if "error" in res and res["error"]:
+        print(f"ERROR: {res['error']}", file=sys.stderr)
+        return 1
+    else:
+        print(format_output(res))
+        return 0
 
 if __name__ == "__main__":
     sys.exit(main())
