@@ -111,8 +111,11 @@ def main():
     elif args.command == "pseudocode": res = client.pseudocode(args.ea)
     elif args.command == "rename-func": res = client.rename_func(args.ea, args.name)
     elif args.command == "exec":
-        with open(args.file, "r", encoding="utf-8") as f:
-            res = client.exec_python(f.read())
+        try:
+            with open(args.file, "r", encoding="utf-8") as f:
+                res = client.exec_python(f.read())
+        except (FileNotFoundError, PermissionError) as e:
+            res = {"error": str(e)}
     else:
         res = {"error": f"Command '{args.command}' not implemented."}
         
