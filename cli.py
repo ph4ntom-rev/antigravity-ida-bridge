@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Unified Antigravity-IDA CLI
-Заменяет legacy bridge.py и bridge_cli.py.
+Replaces legacy bridge.py and bridge_cli.py.
 """
 import sys
 import os
@@ -14,7 +14,7 @@ from pathlib import Path
 from core.client import BridgeClient
 
 def format_output(data: dict) -> int:
-    """Универсальный форматер JSON вывода для CLI."""
+    """Universal JSON output formatter for CLI."""
     if "error" in data and data["error"]:
         print(f"ERROR: {data['error']}", file=sys.stderr)
         return 1
@@ -22,7 +22,7 @@ def format_output(data: dict) -> int:
     return 0
 
 def find_ida() -> str:
-    """Надежный поиск бинарника IDA Pro."""
+    """Reliable search for the IDA Pro binary."""
     env_dir = os.environ.get("IDA_DIR")
     if env_dir:
         for name in ["ida64.exe", "ida.exe", "ida64", "ida"]:
@@ -48,7 +48,7 @@ def find_ida() -> str:
     return ""
 
 def cmd_launch(binary_path: str, client: BridgeClient):
-    """Безопасный запуск IDA Pro с перехватом прав доступа (Устранено скрытое падение)."""
+    """Secure launch of IDA Pro with permission interception (Hidden crash resolved)."""
     target = Path(binary_path).resolve()
     if not target.exists():
         return format_output({"error": f"File not found: {target}"})
@@ -64,7 +64,7 @@ def cmd_launch(binary_path: str, client: BridgeClient):
     plugin_src = Path(__file__).parent / "ida_plugin" / "antigravity_server.py"
     plugin_dst = ida_dir / "plugins" / "antigravity_server.py"
 
-    # [FIX] Теперь юзер узнает, если у него нет админских прав на запись плагина
+    # [FIX] Now the user will know if they lack admin rights to write the plugin
     if plugin_src.exists() and not plugin_dst.exists():
         try:
             plugin_dst.parent.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ def main():
             time.sleep(2)
         return format_output({"error": f"Bridge timeout ({args.timeout}s)"})
     
-    # Диспетчеризация команд
+    # Command dispatch
     elif args.command == "ping": res = client.ping()
     elif args.command == "info": res = client.info()
     elif args.command == "functions": res = client.functions()
