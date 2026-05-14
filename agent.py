@@ -14,10 +14,10 @@ from typing import Dict, Any, List, Optional, Type, Union
 from core.client import BridgeClient
 from core.schema import SchemaLoader
 
-# Настройка логгера
+# Logger configuration
 logger = logging.getLogger("Antigravity.Bridge")
 
-# ── Флаги доступности SDK ──────────────────────────────────────────────
+# ── SDK availability flags ──────────────────────────────────────────────
 try:
     from openai import OpenAI
     HAS_OPENAI = True
@@ -60,7 +60,7 @@ class AgentBackend(ABC):
         self.history: List[Dict[str, Any]] = []
         self.reset()
 
-    # ── Метаданные (Class Methods, избавляют от __new__ хаков) ──
+    # ── Metadata (Class Methods, avoiding __new__ hacks) ──
 
     @classmethod
     @abstractmethod
@@ -83,7 +83,7 @@ class AgentBackend(ABC):
 
     @classmethod
     def list_backends(cls) -> dict:
-        """Безопасный опрос доступных бэкендов без аллокации памяти (O(1))."""
+        """Safe polling of available backends without memory allocation (O(1))."""
         return {
             name: {
                 "name": b_cls.get_name(),
@@ -100,20 +100,20 @@ class AgentBackend(ABC):
                 return name
         return None
 
-    # ── Жизненный цикл и Интерфейс ──
+    # ── Lifecycle and Interface ──
 
     def reset(self) -> None:
-        """Сброс истории для освобождения контекстного окна."""
+        """Reset history to free up the context window."""
         self.history = [{"role": "system", "content": self.get_system_prompt()}]
 
     @abstractmethod
     def chat(self, message: str) -> str: pass
 
-    # ── Фабрика Инструментов (Паттерн DRY) ──
+    # ── Tool Factory (DRY Pattern) ──
 
     @classmethod
     def get_common_tools(cls) -> List[Dict[str, Any]]:
-        """Единый источник истины. Разные SDK конвертируют это под себя."""
+        """Single source of truth. Different SDKs convert this for themselves."""
         return [
             {
                 "type": "function",
@@ -147,12 +147,12 @@ class AgentBackend(ABC):
             },
         ]
 
-    # ── Безопасный Диспетчер Инструментов (Fault-Tolerance) ──
+    # ── Safe Tool Dispatcher (Fault-Tolerance) ──
 
     def _execute_tool(self, func_name: str, func_args: Union[str, Dict[str, Any]]) -> str:
         """
-        Перехватывает ошибки LLM (битый JSON) и падения Python.
-        Возвращает ошибки обратно нейросети для самокоррекции.
+        Intercepts LLM errors (broken JSON) and Python crashes.
+        Returns errors back to the neural network for self-correction.
         """
         available_functions = {
             "call_bridge_api": self.call_bridge_api,
@@ -182,7 +182,7 @@ class AgentBackend(ABC):
             logger.exception(f"Tool runtime exception in {func_name}")
             return json.dumps({"error": f"Execution failed internally: {str(e)}"})
 
-    # ── Реализация Инструментов ──
+    # ── Tool Implementation ──
 
     def execute_idapython(self, script_code: str) -> str:
         logger.info(f"[{self.get_name()}] Executing IDAPython script...")
@@ -254,7 +254,7 @@ class OpenAIBackend(AgentBackend):
 
         self.history.append({"role": "user", "content": message})
 
-        for _ in range(10): # Лимит цикла от бесконечного вызова тулов
+        for _ in range(10): # Loop limit to prevent infinite tool calling
             response = self._client.chat.completions.create(
                 model=self.model,
                 messages=self.history,
@@ -286,7 +286,7 @@ class OpenAIBackend(AgentBackend):
 
 @AgentBackend.register("deepseek")
 class DeepSeekBackend(OpenAIBackend):
-    """Идеальное наследование OpenAI-совместимого бэкенда (DRY)."""
+    """Perfect inheritance of OpenAI-compatible backend (DRY)."""
 
     @classmethod
     def get_name(cls) -> str: return "DeepSeek"
