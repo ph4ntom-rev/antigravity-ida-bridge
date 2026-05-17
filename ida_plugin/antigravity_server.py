@@ -25,9 +25,9 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 # IDA imports
-import ida_kernwin, ida_funcs, ida_name, ida_bytes, ida_segment
-import ida_nalt, ida_entry, ida_idaapi, ida_auto, ida_lines, ida_typeinf
-import idautils, idc
+import ida_kernwin, ida_funcs, ida_name, ida_bytes, ida_segment  # noqa: F401
+import ida_nalt, ida_entry, ida_idaapi, ida_auto, ida_lines, ida_typeinf  # noqa: F401
+import idautils, idc  # noqa: F401
 
 try:
     import ida_hexrays
