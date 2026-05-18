@@ -50,7 +50,7 @@ except ImportError:
 
 class AgentBackend(ABC):
     """Abstract base class for all AI agent backends."""
-    
+
     _registry: Dict[str, Type['AgentBackend']] = {}
 
     def __init__(self, client: Optional[BridgeClient] = None, schema: Optional[SchemaLoader] = None, model: Optional[str] = None):
@@ -64,15 +64,18 @@ class AgentBackend(ABC):
 
     @classmethod
     @abstractmethod
-    def get_name(cls) -> str: pass
+    def get_name(cls) -> str:
+        pass
 
     @classmethod
     @abstractmethod
-    def get_default_model(cls) -> str: pass
+    def get_default_model(cls) -> str:
+        pass
 
     @classmethod
     @abstractmethod
-    def is_available(cls) -> bool: pass
+    def is_available(cls) -> bool:
+        pass
 
     @classmethod
     def register(cls, name: str):
@@ -107,7 +110,8 @@ class AgentBackend(ABC):
         self.history = [{"role": "system", "content": self.get_system_prompt()}]
 
     @abstractmethod
-    def chat(self, message: str) -> str: pass
+    def chat(self, message: str) -> str:
+        pass
 
     # ── Фабрика Инструментов (Паттерн DRY) ──
 
@@ -194,7 +198,7 @@ class AgentBackend(ABC):
 
     def call_bridge_api(self, method: str, path: str, body: Union[str, dict] = "{}") -> str:
         logger.info(f"[{self.get_name()}] Bridge call: {method} {path}")
-        
+
         if isinstance(body, str):
             try:
                 data = json.loads(body) if body.strip() and body != "{}" else None
@@ -227,20 +231,25 @@ class AgentBackend(ABC):
 
 @AgentBackend.register("openai")
 class OpenAIBackend(AgentBackend):
-    
-    @classmethod
-    def get_name(cls) -> str: return "OpenAI"
 
     @classmethod
-    def get_default_model(cls) -> str: return os.environ.get("OPENAI_MODEL", "gpt-4o")
+    def get_name(cls) -> str:
+        return "OpenAI"
 
     @classmethod
-    def get_api_key_env(cls) -> str: return "OPENAI_API_KEY"
+    def get_default_model(cls) -> str:
+        return os.environ.get("OPENAI_MODEL", "gpt-4o")
 
     @classmethod
-    def is_available(cls) -> bool: return HAS_OPENAI and bool(os.environ.get(cls.get_api_key_env()))
+    def get_api_key_env(cls) -> str:
+        return "OPENAI_API_KEY"
 
-    def get_base_url(self) -> Optional[str]: return None
+    @classmethod
+    def is_available(cls) -> bool:
+        return HAS_OPENAI and bool(os.environ.get(cls.get_api_key_env()))
+
+    def get_base_url(self) -> Optional[str]:
+        return None
 
     def reset(self) -> None:
         super().reset()
@@ -250,11 +259,12 @@ class OpenAIBackend(AgentBackend):
         ) if self.is_available() else None
 
     def chat(self, message: str) -> str:
-        if not getattr(self, "_client", None): return "[Error: OpenAI Client not initialized]"
+        if not getattr(self, "_client", None):
+            return "[Error: OpenAI Client not initialized]"
 
         self.history.append({"role": "user", "content": message})
 
-        for _ in range(10): # Лимит цикла от бесконечного вызова тулов
+        for _ in range(10):  # Лимит цикла от бесконечного вызова тулов
             response = self._client.chat.completions.create(
                 model=self.model,
                 messages=self.history,
@@ -289,15 +299,19 @@ class DeepSeekBackend(OpenAIBackend):
     """Идеальное наследование OpenAI-совместимого бэкенда (DRY)."""
 
     @classmethod
-    def get_name(cls) -> str: return "DeepSeek"
+    def get_name(cls) -> str:
+        return "DeepSeek"
 
     @classmethod
-    def get_default_model(cls) -> str: return os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    def get_default_model(cls) -> str:
+        return os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
     @classmethod
-    def get_api_key_env(cls) -> str: return "DEEPSEEK_API_KEY"
+    def get_api_key_env(cls) -> str:
+        return "DEEPSEEK_API_KEY"
 
-    def get_base_url(self) -> str: return "https://api.deepseek.com"
+    def get_base_url(self) -> str:
+        return "https://api.deepseek.com"
 
 
 # ==============================================================================
@@ -308,13 +322,16 @@ class DeepSeekBackend(OpenAIBackend):
 class GeminiBackend(AgentBackend):
 
     @classmethod
-    def get_name(cls) -> str: return "Gemini"
+    def get_name(cls) -> str:
+        return "Gemini"
 
     @classmethod
-    def get_default_model(cls) -> str: return os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+    def get_default_model(cls) -> str:
+        return os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
 
     @classmethod
-    def is_available(cls) -> bool: return HAS_GENAI and bool(os.environ.get("GEMINI_API_KEY"))
+    def is_available(cls) -> bool:
+        return HAS_GENAI and bool(os.environ.get("GEMINI_API_KEY"))
 
     def reset(self) -> None:
         super().reset()
@@ -334,7 +351,7 @@ class GeminiBackend(AgentBackend):
     def chat(self, message: str) -> str:
         if getattr(self, "_chat_session", None) is None:
             return "[Error: Gemini Client not initialized]"
-        
+
         try:
             return self._chat_session.send_message(message).text
         except Exception as e:
@@ -350,14 +367,17 @@ class GeminiBackend(AgentBackend):
 class OllamaBackend(AgentBackend):
 
     @classmethod
-    def get_name(cls) -> str: return "Ollama (Local)"
+    def get_name(cls) -> str:
+        return "Ollama (Local)"
 
     @classmethod
-    def get_default_model(cls) -> str: return os.environ.get("OLLAMA_MODEL", "llama3.1")
+    def get_default_model(cls) -> str:
+        return os.environ.get("OLLAMA_MODEL", "llama3.1")
 
     @classmethod
     def is_available(cls) -> bool:
-        if not HAS_OLLAMA: return False
+        if not HAS_OLLAMA:
+            return False
         try:
             ollama_sdk.list()
             return True
@@ -373,7 +393,7 @@ class OllamaBackend(AgentBackend):
                 messages=self.history,
                 tools=self.get_common_tools(),
             )
-            
+
             msg = response.get("message") if isinstance(response, dict) else response.message
             tool_calls = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
 
@@ -390,7 +410,7 @@ class OllamaBackend(AgentBackend):
             for tool_call in tool_calls:
                 tc = tool_call if isinstance(tool_call, dict) else dict(tool_call)
                 func = tc.get("function", {})
-                
+
                 func_name = func.get("name", "") if isinstance(func, dict) else getattr(func, "name", "")
                 func_args = func.get("arguments", {}) if isinstance(func, dict) else getattr(func, "arguments", {})
 
@@ -408,13 +428,16 @@ class OllamaBackend(AgentBackend):
 class AnthropicBackend(AgentBackend):
 
     @classmethod
-    def get_name(cls) -> str: return "Anthropic Claude"
+    def get_name(cls) -> str:
+        return "Anthropic Claude"
 
     @classmethod
-    def get_default_model(cls) -> str: return os.environ.get("ANTHROPIC_MODEL", "claude-3-7-sonnet-20250219")
+    def get_default_model(cls) -> str:
+        return os.environ.get("ANTHROPIC_MODEL", "claude-3-7-sonnet-20250219")
 
     @classmethod
-    def is_available(cls) -> bool: return HAS_ANTHROPIC and bool(os.environ.get("ANTHROPIC_API_KEY"))
+    def is_available(cls) -> bool:
+        return HAS_ANTHROPIC and bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     def reset(self) -> None:
         self.history = []
@@ -432,7 +455,8 @@ class AnthropicBackend(AgentBackend):
         ]
 
     def chat(self, message: str) -> str:
-        if not getattr(self, "_client", None): return "[Error: Client is not initialized]"
+        if not getattr(self, "_client", None):
+            return "[Error: Client is not initialized]"
 
         self.history.append({"role": "user", "content": message})
 
@@ -466,17 +490,18 @@ class AnthropicBackend(AgentBackend):
 
         return "[Agent reached max iterations]"
 
+
 if __name__ == "__main__":
     # Example chat loop if run directly
     backend_name = AgentBackend.auto_select()
     if not backend_name:
         print("No AI backends available. Set API keys.")
         exit(1)
-        
+
     backend_cls = AgentBackend.get_backend(backend_name)
     agent = backend_cls()
     print(f"Started interactive session with {backend_cls.get_name()} ({agent.model}).")
-    
+
     while True:
         try:
             user_input = input("\n[You]> ")
@@ -486,10 +511,10 @@ if __name__ == "__main__":
                 agent.reset()
                 print("--- Context cleared ---")
                 continue
-                
+
             response = agent.chat(user_input)
             print(f"\n[Agent]> {response}")
-            
+
         except KeyboardInterrupt:
             break
         except Exception as e:
